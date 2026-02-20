@@ -1,0 +1,34 @@
+---
+title: "PLS_rds_to_csv"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+#load packages
+
+```{r, echo=FALSE, include=FALSE}
+install.packages("pacman")
+library(pacman)
+
+pacman::p_load("tidyverse")
+
+```
+
+
+```{r}
+# Read in the RDS
+PLS_speeches <- readRDS("/work/Bachelor_my_workspace/Data_outside_git/Corpus_speeches_denmark.RDS")
+head(PLS_speeches, 10)
+
+```
+
+
+```{r}
+write.csv(PLS_speeches, "/work/Bachelor_my_workspace/Data_outside_git/PLS_speeches.csv", row.names=FALSE)
+```
+

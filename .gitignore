@@ -1,1 +1,4 @@
- 
+# Large data files
+json_files/*.json
+Model_data/*.csv
+data_making/raw_data/*.csv
