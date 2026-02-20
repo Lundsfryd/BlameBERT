@@ -2,7 +2,7 @@
 
 ## Current model can be found on Huggingface:
 - https://huggingface.co/Lundsfryd/blameBERT
-Model will be receiving updates during 2026, but no set timeline exists for this yet.
+- Model will be receiving updates during 2026, but no set timeline exists for this yet.
 
 ## Structure of this repo is (very) roughly as follows:
 
