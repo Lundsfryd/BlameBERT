@@ -39,10 +39,6 @@ class SentenceSegmentation(object):
 
         self.df = pd.read_csv(self.input_path)
 
-        self.df["date"] = pd.to_datetime(self.df["date"])
-
-        self.df.sort_values(by=["date"])
-
         return
     
     def extract_texts(self, n_rows = -1):
