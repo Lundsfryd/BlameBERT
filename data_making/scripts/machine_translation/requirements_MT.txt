@@ -1,0 +1,9 @@
+pathlib
+torch
+tqdm
+transformers
+torch
+IProgress
+ipywidgets
+sentencepiece
+sacremoses
