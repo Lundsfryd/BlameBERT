@@ -4,6 +4,9 @@ from transformers import pipeline
 from tqdm import tqdm
 import pandas as pd
 import json
+from pathlib import Path
+import os
+import argparse
 
 
 class DebateEntailment(object):
@@ -17,8 +20,23 @@ class DebateEntailment(object):
 
         self.read_jsonl(inpath)
         self.get_params()
+        self.get_template_info()
         
         return
+    
+    def get_template_info(self):
+
+        hypothesis_path = Path(os.path.join(".",
+                           "hypothesis_templates.txt"))
+
+        self.labels = ["blame", "praise", "neutral"]
+        self.hypothesis_templates = self.read_file_lines(hypothesis_path)
+        return
+    
+    def read_file_lines(self, filepath):
+        with open(filepath, 'r') as f:
+            return f.read().splitlines()
+    
     
 
     def get_params(self):
@@ -31,11 +49,6 @@ class DebateEntailment(object):
         # Use base model for speed (large is much slower)
         self.pipe = pipeline("zero-shot-classification", model='mlburnham/Political_DEBATE_base_v1.0', device = self.device, batch_size = self.batch_size)
         
-        #automate the following
-        self.hypothesis_template = "Based on this text, the author's attitude towards others is best described as {}."
-        self.labels = ["blame", "praise", "neutral"]
-        self.hypothesis_number = 1
-
 
         return
     
@@ -109,19 +122,74 @@ class DebateEntailment(object):
     def write_blame_to_jsonl(self, decoded):
         """Append translated batch to output file, substituting the 'text' field."""
 
-        with open(self.outpath, 'a', encoding='utf-8') as f:  # 'a' = append, not overwrite
+        with open(self.outpath, self.write_mode, encoding='utf-8') as f:  # 'a' = append, not overwrite
             for blame_value in decoded:
                 record = self.records[self.batch_index].copy()
                 record[f'Hyp_{self.hypothesis_number}_blame'] = blame_value
                 f.write(json.dumps(record, ensure_ascii=False) + '\n')
                 self.batch_index += 1
+            self.write_mode = 'a'  # after first write of this hypothesis, switch back to append
         return
     
 
-    def run_hupothesis_entailment(self):
+    def run_hypothesis_entailment(self):
 
         texts = [record['text'] for record in self.records] 
 
-        self.blame_in_batch(texts)
+        for i, template in enumerate(self.hypothesis_templates):
+
+            self.hypothesis_template = template
+
+            print(f"now for this hypothesis:\n{self.hypothesis_template}")
+            self.hypothesis_number = i+1
+            print(f"this is self.hypothesis_number:\n{self.hypothesis_number}")
+            self.batch_index = 0
+
+
+            #after first run, append to already existing file instead
+            if i > 0:
+                self.read_jsonl(self.outpath)
+                texts = [record['text'] for record in self.records]  # refresh texts
+                self.write_mode = 'w'  # overwrite with enriched records
+            else:
+                self.write_mode = 'a'
+
+            self.blame_in_batch(texts)
 
         return
+    
+
+
+def main():
+
+    parser = argparse.ArgumentParser(
+                    prog='Prelimenary Blame Detection (PBD)',
+                    description='Does PBD from jsonl "text column" and evaluate entailment in comparison to found templates')
+    
+    parser.add_argument("--input_path_jsonl", 
+                        type=Path,
+                        required=True) # add argument
+    
+    parser.add_argument("--output_path_jsonl", 
+                        type=Path,
+                        required=True) # add argument
+    
+    parser.add_argument("--batch_size", 
+                        type=int,
+                        default=2) # add argument
+    
+    parser.add_argument("--GPU",
+                        action="store_true",
+                        help="Use GPU acceleration")
+    
+    args = parser.parse_args()
+
+    DE = DebateEntailment(inpath=input_path,
+                      outpath=output_path,
+                      batch_size=2)
+
+    DE.run_hypothesis_entailment()
+
+
+
+    return
