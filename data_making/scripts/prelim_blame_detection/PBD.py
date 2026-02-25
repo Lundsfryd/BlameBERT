@@ -178,18 +178,17 @@ def main():
                         type=int,
                         default=2) # add argument
     
-    parser.add_argument("--GPU",
-                        action="store_true",
-                        help="Use GPU acceleration")
-    
     args = parser.parse_args()
 
-    DE = DebateEntailment(inpath=input_path,
-                      outpath=output_path,
-                      batch_size=2)
+    DE = DebateEntailment(inpath=args.input_path_jsonl,
+                      outpath=args.output_path_jsonl,
+                      batch_size=args.batch_size)
 
     DE.run_hypothesis_entailment()
 
-
-
     return
+
+
+if __name__ == "__main__":
+
+    main()
