@@ -18,7 +18,6 @@ class SentenceSegmentation(object):
 
         self.output_path = output_path
 
-        self.gpu_setup()
         print("attempting to initialize spacy with gpu... ")
         print(spacy.prefer_gpu())
         spacy.prefer_gpu()
@@ -33,18 +32,6 @@ class SentenceSegmentation(object):
         return
     
 
-    def gpu_setup(self):
-
-        print("Setup for GPU")
-
-        import torch
-        #import cupy
-        
-        #print(f"cuda is available: {torch.cuda.is_available()}")
-        #print(f"Devide name: {torch.cuda.get_device_name(0)}")
-        # check cuda version: nvidia-smi 
-        #Install matching spaCy GPU package, e.g. for CUDA 11.8:
-        #!pip install spacy[cuda118]
 
     def read_data(self):
 
