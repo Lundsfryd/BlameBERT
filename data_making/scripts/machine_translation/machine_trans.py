@@ -16,7 +16,7 @@ import sacremoses
 class MachineTranslation(object):
 
 
-    def __init__(self, jsonl_path, outpath, batch_size=2, gpu=False):
+    def __init__(self, jsonl_path, outpath, batch_size=2):
         
         self.batch_size = batch_size
         self.outpath = outpath
@@ -36,7 +36,8 @@ class MachineTranslation(object):
         model_name = "Helsinki-NLP/opus-mt-da-en"
         self.tokenizer = MarianTokenizer.from_pretrained(model_name)
         self.model = MarianMTModel.from_pretrained(model_name)
-        self.device = "cuda" if self.gpu else "cpu"
+        self.device = 0 if torch.cuda.is_available() else -1
+        print(f"Device: {'cuda' if self.device == 0 else 'cpu'}")
         self.model.to(self.device)
         self.model.eval()
 
@@ -78,7 +79,7 @@ class MachineTranslation(object):
             inputs = self.tokenizer(batch, return_tensors="pt", padding=True, truncation=True)
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
-            if self.device == "cuda":
+            if self.device == 0:
                 with torch.no_grad(), autocast():
                     translated = self.model.generate(**inputs)
             else:
@@ -133,16 +134,11 @@ def main():
                         type=int,
                         default=2) # add argument
     
-    parser.add_argument("--GPU",
-                        action="store_true",
-                        help="Use GPU acceleration")
-    
     args = parser.parse_args()
 
     MT = MachineTranslation(jsonl_path = args.input_path_jsonl, 
                         outpath = args.output_path_jsonl, 
-                        batch_size=args.batch_size, 
-                        gpu=args.GPU)
+                        batch_size=args.batch_size)
 
     MT.run_translation()
 
