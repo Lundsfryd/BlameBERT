@@ -36,7 +36,9 @@ class TemplateManipulation(object):
         self.clean_keys = set(clean_keys)
         self.validation_path = os.path.join(self.outdir,
                                             "training",
-                                            "validation_set.jsonl")
+                                            "validation",
+                                            "label_studio",
+                                            "initial_validation_set.jsonl")
 
         self.setup()
 
