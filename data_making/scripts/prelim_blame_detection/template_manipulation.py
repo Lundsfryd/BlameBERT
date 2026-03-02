@@ -6,6 +6,7 @@ from collections import Counter
 import matplotlib.pyplot as plt
 import argparse
 from pathlib import Path
+import random
 
 
 class TemplateManipulation(object):
@@ -26,14 +27,29 @@ class TemplateManipulation(object):
 
     # --------------------------------------------------------------------#
 
-    def __init__(self, input_path, output_path):
+    def __init__(self, input_path, output_path, validation_size = 300, clean_keys = []):
 
         self.input_path = input_path
         self.output_path = output_path
         self.outdir = os.path.dirname(output_path)
+        self.validation_size = validation_size
+        self.clean_keys = set(clean_keys)
+        self.validation_path = os.path.join(self.outdir,
+                                            "training",
+                                            "validation_set.jsonl")
+
+        self.setup()
 
         return
     
+    def setup(self):
+        os.makedirs(os.path.dirname(self.validation_path), exist_ok=True)
+
+        #detect n hypothesis entries in data
+        self.detect_n_hypotheses()
+
+        #add a key denoting how many hypothesis labelled true
+        self.add_n_hyp_entail()
     
     # --------------------------------------------------------------------#
 
@@ -115,13 +131,39 @@ class TemplateManipulation(object):
                     for threshold, fout in writers.items():
                         record_out = record.copy()
                         record_out["label"] = int(entail >= threshold)
-                        fout.write(json.dumps(record_out, ensure_ascii=False) + "\n")
+
+                        validation, record_out = self.validate_clean_record(record_out)
+
+                        if validation == True:
+                            fout.write(json.dumps(record_out, ensure_ascii=False) + "\n")
+                        else:
+                            continue
 
         finally:
             for f in writers.values():
                 f.close()
         
     # --------------------------------------------------------------------#
+    def validate_clean_record(self, record):
+
+        record = self.clean_keys_in_record(record)
+
+        #evaluate in record is in self.validation_set
+
+        record_id = (record.get("paragraph_nr"), record.get("sentence_nr"))
+        if record_id in self.validation_ids:
+            validation = False
+        else:
+            validation = True
+
+        return validation, record
+    
+    
+    def clean_keys_in_record(self, record):
+        for key in self.clean_keys:
+                    record.pop(key, None)  # safe if key missing
+
+        return record
     
     def create_dir(self):
 
@@ -142,6 +184,9 @@ class TemplateManipulation(object):
 
         self.create_dir()
 
+        #make validation set
+        self.make_validation_set()
+
         # Open all output files at once
         writers = self.setup_writers()
 
@@ -151,22 +196,91 @@ class TemplateManipulation(object):
         return
     
     # --------------------------------------------------------------------#
-    
-    def create_datasets_diff_agreement(self):
+    def read_labels(self):
+        true_labels = []
+        false_labels = []
+        
+        with open(self.output_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    record = json.loads(line)
+                    if record['n_hyp_entail'] > 0:
+                        true_labels.append(record)
+                    else:
+                        false_labels.append(record)
 
-        #detect n hypothesis entries in data
-        self.detect_n_hypotheses()
-
-        #add a key denoting how many hypothesis labelled true
-        self.add_n_hyp_entail()
-
-        #create datasets of different levels of agreement
-        self.create_datasets()
+        return true_labels, false_labels
 
 
-        return
-    
+    def make_validation_set(self):
+        """
+        Create a balanced validation set from a jsonl file.
+        
+        Args:
+            input_file: path to input jsonl file
+            validation_size: desired size of the validation set
+        
+        Returns:
+            List of records forming the validation set
+        """
+        #read and append true/false records from output file
+        true_labels, false_labels = self.read_labels()
+                
+        n_true, n_false = self.evaluate_nr_labels(true_labels, false_labels)
+
+        sampled_true = random.sample(true_labels, n_true)
+        sampled_false = random.sample(false_labels, n_false)
+
+        self.validation_set = sampled_true + sampled_false
+        random.shuffle(self.validation_set)
+
+        print(f"Validation set created with {len(self.validation_set)} records: "
+            f"{n_true} true labels, {n_false} false labels.")
+        
+        self.write_validation_set(self.validation_set)
+
+        self.validation_ids = {
+        (r["paragraph_nr"], r["sentence_nr"])
+        for r in self.validation_set
+}
+        
+        return self.validation_set
     # --------------------------------------------------------------------#
+
+    def evaluate_nr_labels(self,true_labels, false_labels):
+        
+        n_true_available = len(true_labels)
+        n_false_available = len(false_labels)
+        n_per_class = self.validation_size // 2
+
+        if n_true_available < n_per_class:
+            print(f"Warning: Only {n_true_available} true labels available, "
+                f"which is fewer than the desired {n_per_class}. "
+                f"Including all true labels and matching with false labels.")
+            n_true = n_true_available
+            n_false = min(n_true_available, n_false_available)
+        else:
+            n_true = n_per_class
+            n_false = min(n_per_class, n_false_available)
+
+        return n_true, n_false
+
+    def write_validation_set(self, validation_set):
+        """
+        Write a validation set to a jsonl file.
+        
+        Args:
+            validation_set: list of records to write
+            validation_path: path to output jsonl file
+        """
+        with open(self.validation_path, 'w', encoding='utf-8') as f:
+            for record in validation_set:
+                record["label"] = 1 if record["n_hyp_entail"] > 0 else 0
+                record = self.clean_keys_in_record(record)
+                f.write(json.dumps(record, ensure_ascii=False) + '\n')
+        
+        print(f"Validation set written to {self.validation_path}")
 
     def compute_agreement_statistics_per_hyp(self):
         """
@@ -271,18 +385,26 @@ def main():
     parser.add_argument("--ylim", 
                         type=int,
                         default=10) # add argument
+    
+    parser.add_argument("--validation_size", 
+                        type=int,
+                        default=300) # add argument
+    
+    parser.add_argument("--clean_keys",
+                        nargs="*",
+                        default=[],
+                        help="Keys to remove from JSONL records")
 
 
     args = parser.parse_args()
 
     TM = TemplateManipulation(input_path = args.input_path,
-                            output_path = args.output_path)
+                            output_path = args.output_path,
+                            validation_size=args.validation_size,
+                            clean_keys=args.clean_keys)
 
-    TM.create_datasets_diff_agreement()
+    TM.create_datasets()
     TM.run_statistics(ylim=args.ylim)
-
-    TM.create_datasets_diff_agreement()
-    TM.run_statistics()
 
 
 

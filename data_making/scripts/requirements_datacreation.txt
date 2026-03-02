@@ -10,3 +10,4 @@ sacremoses
 pandas
 matplotlib
 argparse
+glob

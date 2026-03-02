@@ -20,7 +20,6 @@ class MachineTranslation(object):
         
         self.batch_size = batch_size
         self.outpath = outpath
-        self.gpu = gpu
         self.batch_index = 0  # tracks which record in self.records to start from for each batch
 
         self.set_params()
@@ -36,8 +35,8 @@ class MachineTranslation(object):
         model_name = "Helsinki-NLP/opus-mt-da-en"
         self.tokenizer = MarianTokenizer.from_pretrained(model_name)
         self.model = MarianMTModel.from_pretrained(model_name)
-        self.device = 0 if torch.cuda.is_available() else -1
-        print(f"Device: {'cuda' if self.device == 0 else 'cpu'}")
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"  # <-- fix here
+        print(f"Device: {self.device}")
         self.model.to(self.device)
         self.model.eval()
 
@@ -79,7 +78,7 @@ class MachineTranslation(object):
             inputs = self.tokenizer(batch, return_tensors="pt", padding=True, truncation=True)
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
-            if self.device == 0:
+            if self.device == "cuda":
                 with torch.no_grad(), autocast():
                     translated = self.model.generate(**inputs)
             else:
@@ -99,7 +98,7 @@ class MachineTranslation(object):
         with open(self.outpath, 'a', encoding='utf-8') as f:  # 'a' = append, not overwrite
             for translated_text in decoded:
                 record = self.records[self.batch_index].copy()
-                record['text'] = translated_text
+                record['translated_text'] = translated_text
                 f.write(json.dumps(record, ensure_ascii=False) + '\n')
                 self.batch_index += 1
         return

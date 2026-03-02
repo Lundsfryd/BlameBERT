@@ -120,7 +120,7 @@ class DebateEntailment(object):
         return blame_binary
 
     def write_blame_to_jsonl(self, decoded):
-        """Append translated batch to output file, substituting the 'text' field."""
+        """Append translated batch to output file, adding the 'hyp_ntemp_blame' field."""
 
         with open(self.outpath, self.write_mode, encoding='utf-8') as f:  # 'a' = append, not overwrite
             for blame_value in decoded:
@@ -134,7 +134,7 @@ class DebateEntailment(object):
 
     def run_hypothesis_entailment(self):
 
-        texts = [record['text'] for record in self.records] 
+        texts = [record['translated_text'] for record in self.records] 
 
         for i, template in enumerate(self.hypothesis_templates):
 
@@ -149,7 +149,7 @@ class DebateEntailment(object):
             #after first run, append to already existing file instead
             if i > 0:
                 self.read_jsonl(self.outpath)
-                texts = [record['text'] for record in self.records]  # refresh texts
+                texts = [record['translated_text'] for record in self.records]  # refresh texts
                 self.write_mode = 'w'  # overwrite with enriched records
             else:
                 self.write_mode = 'a'
@@ -164,7 +164,7 @@ def main():
 
     parser = argparse.ArgumentParser(
                     prog='Prelimenary Blame Detection (PBD)',
-                    description='Does PBD from jsonl "text column" and evaluate entailment in comparison to found templates')
+                    description='Does PBD from jsonl "translated_text column" and evaluate entailment in comparison to found templates')
     
     parser.add_argument("--input_path_jsonl", 
                         type=Path,
