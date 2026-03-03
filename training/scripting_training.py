@@ -26,13 +26,16 @@ from sklearn.metrics import accuracy_score, f1_score, average_precision_score, r
 def main():
    model = ModelInstantiation()
 
-   # Loading data, improve filepaths with path objects going forward - for testing i am using the same data twice
+   # Loading data, for testing i am using 5 labelled data
    # Load data function also returns class weights
-   tokenized_val, tokenized_train, class_weights = load_data(model, "/work/Bachelor/Bachelor_project/Model_data/validation_set.json", "/work/Bachelor/Bachelor_project/Model_data/validation_set.json")
+   validation_data_path = os.path.join("..","Model_data","validation_set.json")
+   train_data_path = os.path.join("..","data_making","raw_data","test_diff_hypothesis_agreemen","5_agreement.jsonl")
+
+   tokenized_val, tokenized_train, class_weights = load_data(model, input_path_val=validation_data_path, input_path_train=train_data_path)#"/work/Bachelor/Bachelor_project/Model_data/validation_set.json", "/work/Bachelor/Bachelor_project/Model_data/validation_set.json")
 
    trainer = WeightedLossTrainer(
       model=model.lora_model,
-      args=model.training_setup("../../output/checkpoints"), # This saves checkpoints
+      args=model.training_setup("../../output/checkpoints"), # This saves checkpoints to an output folder
       train_dataset=tokenized_train,
       eval_dataset=tokenized_val,
       compute_metrics=model.compute_metrics,
@@ -55,7 +58,7 @@ class ModelInstantiation():
       self.base_model_name = base_model_name if base_model_name else "jhu-clsp/mmBERT-base" # For defaulting to BERT
       self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name) if tokenizer is None else tokenizer
       self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-      print(self.device)
+      print(f'Running training on {self.device}')
       with open('/work/Bachelor/hugging_api.txt', 'r') as f: # Currently inflexible, should be changed to allow for access token to be None as well
          self.access_token = f.read().strip()
 
@@ -151,13 +154,8 @@ class ModelInstantiation():
           'number_of_true_preds': sum(probs.round()),
           'number_of_true_labels': sum(labels)
       }
-   def compute_class_weights(self, train_data):
-      label_counts = train_data['labels'].value_counts()
-      total = len(train_data)
-      weight_for_0 = total / (2 * label_counts[0])
-      weight_for_1 = total / (2 * label_counts[1])
 
-      return torch.tensor([weight_for_0, weight_for_1], dtype=torch.float32)
+
 
 class WeightedLossTrainer(Trainer):
     def __init__(self, *args, class_weights=None, **kwargs):
@@ -176,6 +174,19 @@ class WeightedLossTrainer(Trainer):
 
 
 # %%
+def read_jsonl(file_path):
+
+   """Read a jsonl file and return a list of records."""
+
+   print("Reading input .jsonl file...\n")
+   records = []
+   with open(file_path, 'r', encoding='utf-8') as f:
+      for line in f:
+            line = line.strip()
+            if line:
+               records.append(json.loads(line))
+   return records
+
 def load_data(model_instance, input_path_val, input_path_train):
    val_data = pd.read_json(input_path_val)
    val_data = val_data[['text', 'label']]
@@ -183,13 +194,14 @@ def load_data(model_instance, input_path_val, input_path_train):
    val_dataset = Dataset.from_pandas(val_data)
    tokenized_val = val_dataset.map(model_instance.tokenize_function, batched=True, num_proc=16)
 
-   train_data = pd.read_json(input_path_train)
+   train_records = read_jsonl(input_path_train) # Be aware of different json formats for val and train sets right now
+   train_data = pd.DataFrame(train_records) # Necessary to convert to dataframe for the following operations
    train_data = train_data[['text', 'label']]
    train_data.rename(columns={'label': 'labels'}, inplace=True)
    label_counts = train_data['labels'].value_counts()
    total = len(train_data)
    weight_for_0 = total / (2 * label_counts[0])
-   weight_for_1 = total / (2 * label_counts[1])
+   weight_for_1 = total / (2 * label_counts[1]) # Currently crashes as the input data contains no 1 labels - should theoretically be ready however
    train_dataset = Dataset.from_pandas(train_data)
    tokenized_train = train_dataset.map(model_instance.tokenize_function, batched=True, num_proc=16)
 
