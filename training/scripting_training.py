@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import keras
 import json
+import os 
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, TrainingArguments, Trainer, BitsAndBytesConfig
 from datasets import Dataset
@@ -22,10 +23,39 @@ from keras.losses import binary_crossentropy
 from sklearn.metrics import accuracy_score, f1_score, average_precision_score, recall_score, classification_report, confusion_matrix
 
 # %%
+def main():
+   model = ModelInstantiation()
+
+   # Loading data, improve filepaths with path objects going forward - for testing i am using the same data twice
+   # Load data function also returns class weights
+   tokenized_val, tokenized_train, class_weights = load_data(model, "/work/Bachelor/Bachelor_project/Model_data/validation_set.json", "/work/Bachelor/Bachelor_project/Model_data/validation_set.json")
+
+   trainer = WeightedLossTrainer(
+      model=model.lora_model,
+      args=model.training_setup("../../output/checkpoints"), # This saves checkpoints
+      train_dataset=tokenized_train,
+      eval_dataset=tokenized_val,
+      compute_metrics=model.compute_metrics,
+      class_weights=class_weights
+   )
+
+   trainer.train()
+
+   # Saving
+   output_model_dir = os.path.join("..","..","output","full_model")
+   os.makedirs(output_model_dir, exist_ok=True)
+   saved_model = trainer.model
+   saved_model.save_pretrained(output_model_dir)
+
+
+
+# %%
 class ModelInstantiation():
    def __init__(self, base_model_name=None, tokenizer=None, access_token=None):
       self.base_model_name = base_model_name if base_model_name else "jhu-clsp/mmBERT-base" # For defaulting to BERT
       self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name) if tokenizer is None else tokenizer
+      self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+      print(self.device)
       with open('/work/Bachelor/hugging_api.txt', 'r') as f: # Currently inflexible, should be changed to allow for access token to be None as well
          self.access_token = f.read().strip()
 
@@ -50,6 +80,7 @@ class ModelInstantiation():
 
       self.lora_model = get_peft_model(lora_model, lora_config)
       self.lora_model.print_trainable_parameters()
+      return
 
    def tokenize_function(self, examples):
       encoded = self.tokenizer(
@@ -60,7 +91,7 @@ class ModelInstantiation():
       )
       return encoded
 
-   def training_setup(self, output_path_checkpoints):
+   def training_setup(self, output_path_checkpoints=None):
       self.training_args = TrainingArguments(
         output_dir=output_path_checkpoints,
         learning_rate=1e-5,
@@ -80,6 +111,7 @@ class ModelInstantiation():
         metric_for_best_model="f1",
         greater_is_better=True,
       )
+      return
 
    def weighted_bincrossentropy(self, true, pred, train_data):
       label_counts = train_data['labels'].value_counts()
@@ -103,23 +135,29 @@ class ModelInstantiation():
    def compute_metrics(self, eval_pred):
       predictions, labels = eval_pred
       probs_2d = np.exp(predictions) / np.exp(predictions).sum(axis=1, keepdims=True)
-      probs = probs_2d[:, 1]
+      probs = probs_2d[:, 1] # Keeping only positive class
 
-      weighted_bce = self.weighted_bincrossentropy(labels, probs, train_data=None)  # pass train_data as needed
+      weighted_bce = self.weighted_bincrossentropy(labels, probs, train_data=None)
       keras_bce = binary_crossentropy(labels, probs)
-      keras_bce = float(np.mean(keras_bce.numpy()))
+      keras_bce = float(np.mean(keras_bce.numpy())) # From eagertensor (keras) to float
 
       return {
           'keras_BCE': keras_bce,
           'weighted BCE': weighted_bce, 
           'recall': float(recall_score(labels, probs.round())),
           'precision': float(average_precision_score(labels, probs.round())),  # OBS CHANGE THIS
-          'accuracy': float(accuracy_score(labels, probs.round())),
-          'f1': float(f1_score(labels, probs.round(), average='macro')),
+          'accuracy': float(accuracy_score(labels, probs.round())), # Rounding required as this only takes integers
+          'f1': float(f1_score(labels, probs.round(), average='macro')), # Macro f1 is best for imbalanced data
           'number_of_true_preds': sum(probs.round()),
           'number_of_true_labels': sum(labels)
       }
+   def compute_class_weights(self, train_data):
+      label_counts = train_data['labels'].value_counts()
+      total = len(train_data)
+      weight_for_0 = total / (2 * label_counts[0])
+      weight_for_1 = total / (2 * label_counts[1])
 
+      return torch.tensor([weight_for_0, weight_for_1], dtype=torch.float32)
 
 class WeightedLossTrainer(Trainer):
     def __init__(self, *args, class_weights=None, **kwargs):
@@ -148,23 +186,15 @@ def load_data(model_instance, input_path_val, input_path_train):
    train_data = pd.read_json(input_path_train)
    train_data = train_data[['text', 'label']]
    train_data.rename(columns={'label': 'labels'}, inplace=True)
+   label_counts = train_data['labels'].value_counts()
+   total = len(train_data)
+   weight_for_0 = total / (2 * label_counts[0])
+   weight_for_1 = total / (2 * label_counts[1])
    train_dataset = Dataset.from_pandas(train_data)
    tokenized_train = train_dataset.map(model_instance.tokenize_function, batched=True, num_proc=16)
 
-   return tokenized_val, tokenized_train
+   return tokenized_val, tokenized_train, torch.tensor([weight_for_0, weight_for_1], dtype=torch.float32) #Class weights
 
-
-# %%
-def main():
-   model = ModelInstantiation()
-
-   # Loading data, improve filepaths with path objects going forward - for testing i am using the same data twice
-   tokenized_val, tokenized_train = load_data(model, "/work/Bachelor/Bachelor_project/Model_data/validation_set.json", "/work/Bachelor/Bachelor_project/Model_data/validation_set.json")
-
-   # Init training arguments and weigthed trainer
-   model.training_setup("../../output")
-
-   pass
 
 # %%
 if __name__ == "__main__":
