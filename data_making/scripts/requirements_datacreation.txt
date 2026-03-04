@@ -1,5 +1,4 @@
 pathlib
-torch
 tqdm
 transformers
 torch
@@ -10,4 +9,3 @@ sacremoses
 pandas
 matplotlib
 argparse
-glob

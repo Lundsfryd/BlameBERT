@@ -38,3 +38,30 @@ class Formatter(object):
             json.dump(tasks, f, ensure_ascii=False, indent=2)
 
         print(f"Converted {len(tasks)} records to Label Studio format: {output_path}")
+
+
+    def json_to_jsonl(input_path, output_path):
+        """
+        Convert a Label Studio-style JSON file to a flattened JSONL file.
+        """
+
+        with open(input_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        with open(output_path, "w", encoding="utf-8") as out:
+            for item in data:
+                meta = item.get("meta", {})
+
+                jsonl_item = {
+                    "date": meta.get("date"),
+                    "speaker": meta.get("speaker"),
+                    "party": meta.get("party"),
+                    "paragraph_nr": meta.get("paragraph_nr"),
+                    "sentence_nr": meta.get("sentence_nr"),
+                    "partyfacys_ID": meta.get("partyfacys_ID"),
+                    "text": item.get("text"),
+                    "label": meta.get("label"),
+                    "evaluation": item.get("evaluation"),
+                }
+
+                out.write(json.dumps(jsonl_item, ensure_ascii=False) + "\n")
