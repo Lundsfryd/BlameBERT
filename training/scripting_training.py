@@ -59,8 +59,12 @@ class ModelInstantiation():
       self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name) if tokenizer is None else tokenizer
       self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
       print(f'Running training on {self.device}')
-      with open('/work/Bachelor/hugging_api.txt', 'r') as f: # Currently inflexible, should be changed to allow for access token to be None as well
-         self.access_token = f.read().strip()
+      
+      self.access_token = access_token
+
+      if self.access_token is not None:
+         with open('/work/Bachelor/hugging_api.txt', 'r') as f: # Currently inflexible, should be changed to allow for access token to be None as well
+            self.access_token = f.read().strip()
 
       base_model = AutoModelForSequenceClassification.from_pretrained(
         self.base_model_name, # Full precision
