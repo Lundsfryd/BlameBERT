@@ -10,3 +10,4 @@ pandas
 matplotlib
 argparse
 statsmodels
+scikit-learn

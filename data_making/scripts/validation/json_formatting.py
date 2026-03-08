@@ -1,6 +1,6 @@
 # import modules
 import json
-
+from sklearn.metrics import accuracy_score, f1_score, average_precision_score, recall_score, confusion_matrix
 
 class Formatter(object):
 
@@ -212,6 +212,40 @@ class Formatter(object):
         }
 
 
+    def allignment_stats(self, pairs):
+
+        y_model = []
+        y_ann = []
+
+        for a, b in pairs:
+            # Safety: ensure same sentence unit
+            if (a["paragraph_nr"], a["sentence_nr"]) != (b["paragraph_nr"], b["sentence_nr"]):
+                continue
+
+            # Only include pairs where annotators agree on evaluation
+            if a["evaluation"] != b["evaluation"]:
+                continue
+
+            evaluation = int(a["evaluation"])  # same in both since they agree
+            label = a.get("label") 
+
+            y_ann.append(evaluation)
+            y_model.append(label)
+        
+        cm = confusion_matrix(y_ann, y_model)
+
+        stats = {
+            'recall': float(recall_score(y_ann, y_model)),
+            'precision': float(average_precision_score(y_ann, y_model)),
+            'accuracy': float(accuracy_score(y_ann, y_model)), # Need rounding for these two computations (integer required)
+            'f1': float(f1_score(y_ann, y_model, average='macro'))} # macro f1 is better for imbalanced dataset
+
+
+        return stats, cm
+
+        
+
+
     def compare_LS_files(self, input_file_1, input_file_2, output_file):
         """
         Full pipeline:
@@ -229,6 +263,7 @@ class Formatter(object):
 
         kappa = self.cohens_kappa_from_pairs(aligned_pairs)
         stats = self.agreement_stats_from_pairs(aligned_pairs)
+        allign_stats, con_mat = self.allignment_stats(aligned_pairs)
 
         # ── Print summary ──────────────────────────────────────────────
         print("=" * 50)
@@ -254,6 +289,13 @@ class Formatter(object):
                 print(f"    Agreement %         : N/A (neither annotator used this label)")
 
         print("=" * 50)
+
+        print(f"\nConfusion matrix for alignment between aggreed upon annotated labels (y_true)\nand label deceided by DEBATE model + heuristics + level of agreeement:\n{con_mat} \n")
+        print(f"\nAllignment statsbetween annotater agreement and prelim blame localization:\n{allign_stats}")
+
+        print("=" * 50)
+
+
 
         self.write_agreed_annotations(aligned_pairs, output_file)
         print(f"\nAgreed annotations written to: {output_file}")
