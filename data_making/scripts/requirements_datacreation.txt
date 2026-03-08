@@ -9,3 +9,4 @@ sacremoses
 pandas
 matplotlib
 argparse
+statsmodels

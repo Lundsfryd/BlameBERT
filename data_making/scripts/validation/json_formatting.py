@@ -40,7 +40,7 @@ class Formatter(object):
         print(f"Converted {len(tasks)} records to Label Studio format: {output_path}")
 
 
-    def json_to_jsonl(input_path, output_path):
+    def json_to_jsonl(self, input_path, output_path):
         """
         Convert a Label Studio-style JSON file to a flattened JSONL file.
         """
@@ -145,7 +145,71 @@ class Formatter(object):
         with open(output_path, "w", encoding="utf-8") as out:
             for a, b in pairs:
                 if a["evaluation"] == b["evaluation"]:
+                    a["label"] = a.get("evaluation")
+                    a.pop("evaluation",0)
                     out.write(json.dumps(a, ensure_ascii=False) + "\n")
+
+
+
+    def agreement_stats_from_pairs(self, pairs):
+        """
+        Compute per-label agreement statistics from aligned annotation pairs.
+        Returns a dict with stats for label=1 (Blame), label=0 (No Blame), and overall.
+        """
+        if not pairs:
+            raise ValueError("No overlapping annotations to compute agreement")
+
+        a_labels = [a["evaluation"] for a, _ in pairs]
+        b_labels = [b["evaluation"] for _, b in pairs]
+        n = len(a_labels)
+
+        # --- Overall ---
+        overall_agree = sum(a == b for a, b in zip(a_labels, b_labels))
+
+        # --- Label = 1 (Blame) ---
+        # Both said Blame
+        both_1       = sum(a == 1 and b == 1 for a, b in zip(a_labels, b_labels))
+        # At least one said Blame (union, for denominator)
+        either_1     = sum(a == 1 or  b == 1 for a, b in zip(a_labels, b_labels))
+        # Only annotator A said Blame
+        only_a_1     = sum(a == 1 and b == 0 for a, b in zip(a_labels, b_labels))
+        # Only annotator B said Blame
+        only_b_1     = sum(a == 0 and b == 1 for a, b in zip(a_labels, b_labels))
+
+        # --- Label = 0 (No Blame) ---
+        both_0       = sum(a == 0 and b == 0 for a, b in zip(a_labels, b_labels))
+        either_0     = sum(a == 0 or  b == 0 for a, b in zip(a_labels, b_labels))
+        only_a_0     = sum(a == 0 and b == 1 for a, b in zip(a_labels, b_labels))
+        only_b_0     = sum(a == 1 and b == 0 for a, b in zip(a_labels, b_labels))
+
+        def safe_div(num, denom):
+            return num / denom if denom else None
+
+        return {
+            "n_total": n,
+            "n_agree": overall_agree,
+            "overall_agreement_pct": safe_div(overall_agree, n),
+
+            "blame": {
+                "both_annotated":    both_1,
+                "only_annotator_1":  only_a_1,
+                "only_annotator_2":  only_b_1,
+                "union":             either_1,
+                # What fraction of all Blame instances (union) did both agree on?
+                "agreement_pct":     safe_div(both_1, either_1),
+                # Of all sentences, how often did BOTH say Blame?
+                "joint_rate":        safe_div(both_1, n),
+            },
+
+            "no_blame": {
+                "both_annotated":    both_0,
+                "only_annotator_1":  only_a_0,
+                "only_annotator_2":  only_b_0,
+                "union":             either_0,
+                "agreement_pct":     safe_div(both_0, either_0),
+                "joint_rate":        safe_div(both_0, n),
+            },
+        }
 
 
     def compare_LS_files(self, input_file_1, input_file_2, output_file):
@@ -154,6 +218,7 @@ class Formatter(object):
         - Normalize evaluations
         - Align by (paragraph_nr, sentence_nr)
         - Compute Cohen's kappa
+        - Compute per-label agreement statistics
         - Write agreed annotations
         """
 
@@ -163,9 +228,34 @@ class Formatter(object):
         aligned_pairs = self.align_by_paragraph_sentence(ann_1, ann_2)
 
         kappa = self.cohens_kappa_from_pairs(aligned_pairs)
-        print(f"Cohen's κ (aligned): {kappa:.3f}")
-        print(f"Aligned items: {len(aligned_pairs)}")
+        stats = self.agreement_stats_from_pairs(aligned_pairs)
+
+        # ── Print summary ──────────────────────────────────────────────
+        print("=" * 50)
+        print("INTER-ANNOTATOR AGREEMENT REPORT")
+        print("=" * 50)
+
+        print(f"\nAligned sentence pairs : {stats['n_total']}")
+        print(f"Overall agreed pairs   : {stats['n_agree']}  "
+            f"({stats['overall_agreement_pct']:.1%})")
+        print(f"Cohen's κ              : {kappa:.3f}")
+
+        for label_name, label_key in [("BLAME  (label=1)", "blame"),
+                                    ("NO BLAME (label=0)", "no_blame")]:
+            s = stats[label_key]
+            print(f"\n  {label_name}")
+            print(f"    Both annotated      : {s['both_annotated']}")
+            print(f"    Only annotator 1    : {s['only_annotator_1']}")
+            print(f"    Only annotator 2    : {s['only_annotator_2']}")
+            if s["agreement_pct"] is not None:
+                print(f"    Agreement %         : {s['agreement_pct']:.1%}  "
+                    f"(agreed / union = {s['both_annotated']}/{s['union']})")
+            else:
+                print(f"    Agreement %         : N/A (neither annotator used this label)")
+
+        print("=" * 50)
 
         self.write_agreed_annotations(aligned_pairs, output_file)
+        print(f"\nAgreed annotations written to: {output_file}")
 
-        print(f"Agreed annotations written to: {output_file}")
+        return {"kappa": kappa, **stats}
