@@ -116,7 +116,7 @@ if __name__ == "__main__":
     files = [os.path.join(folder_path, file) for folder_path in folder_paths for file in os.listdir(folder_path)]
     df = parse_multiple_ft_xml(files)
 
-    outpath = os.path.join("..","..","raw_data")
+    outpath = os.path.join("..","..","..","..","data","csv_meetings")
     os.makedirs(outpath, exist_ok=True)
 
     df.to_csv(f'{outpath}/meetings.csv', index=False)
