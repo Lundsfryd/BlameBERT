@@ -116,12 +116,12 @@ if __name__ == "__main__":
     files = [os.path.join(folder_path, file) for folder_path in folder_paths for file in os.listdir(folder_path)]
     df = parse_multiple_ft_xml(files)
 
-    # Excluding irrelevant data
-    df = df[df['role'] != "formand"] # Excluding formand as they represent no party and are therefore irrelevant
+    # Excluding irrelevant data and creating columns for further processing
+    df["chair"] = df["role"] == "formand"
     df = df[df["party"] != "MødeSlut"] # Exclude "MødeSlut" indicators (no data)
-
+    
+    # Saving, creating directory if nonexistant
     outpath = os.path.join("..","..","..","..","data","csv_meetings")
     os.makedirs(outpath, exist_ok=True)
-
     df.to_csv(f'{outpath}/meetings.csv', index=False)
     print(f'Processing finished! Saved to {outpath}/meetings.csv')
