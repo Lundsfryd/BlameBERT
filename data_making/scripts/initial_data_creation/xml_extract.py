@@ -1,6 +1,5 @@
 import pandas as pd
 import os
-import argparse
 from pathlib import Path
 from datetime import datetime
 from lxml import etree
@@ -23,10 +22,11 @@ def parse_ft_xml(file_path: str | Path) -> pd.DataFrame:
     Parse a single XML file.
 
     Returns a DataFrame with one row per <Tale> (speech) containing:
-        - paragraph_index : index of the <Tale> (paragraph) *within* the file
+        - paragraph_nr    : index of the <Tale> (paragraph) *within* the file
         - date            : date of meeting (YYYY-MM-DD)
-        - name            : speaker's name (<OratorFirstName> + <OratorLastName>)
+        - speaker         : speaker's name (<OratorFirstName> + <OratorLastName>)
         - party           : party letter (<GroupNameShort>)
+        - role            : speakers role in Folketinget ("medlem", "minister", "formand"...)
         - text            : all text from the speaker's <TekstGruppe> elements combined
         - source_file     : basename of the source file
     """
@@ -48,7 +48,7 @@ def parse_ft_xml(file_path: str | Path) -> pd.DataFrame:
     source_file = Path(file_path).name
     rows = []
 
-    for paragraph_index, tale in enumerate(root.findall(".//Tale")):
+    for paragraph_nr, tale in enumerate(root.findall(".//Tale")):
         # Speaker metadata 
         fn_el = tale.find(".//OratorFirstName")
         ln_el = tale.find(".//OratorLastName")
@@ -64,7 +64,7 @@ def parse_ft_xml(file_path: str | Path) -> pd.DataFrame:
         if rl_el is not None:
             role = (rl_el.text or "").strip()
 
-        full_name = first_name+" "+last_name
+        speaker = first_name+" "+last_name
 
         # Text extraction
         tale_segment = tale.find("TaleSegment")
@@ -72,9 +72,9 @@ def parse_ft_xml(file_path: str | Path) -> pd.DataFrame:
 
         rows.append(
             {
-                "paragraph_index": paragraph_index,
+                "paragraph_nr": paragraph_nr,
                 "date": date_str,
-                "name": full_name,
+                "speaker": speaker,
                 "party": party,
                 "role": role,
                 "text": text,
@@ -86,7 +86,7 @@ def parse_ft_xml(file_path: str | Path) -> pd.DataFrame:
 def parse_multiple_ft_xml(file_paths: list[str | Path]) -> pd.DataFrame:
     """
     Parse multiple XML files and return a single combined DataFrame. 
-    Rows from different files are stacked so "paragraph_index" resets per file. 
+    Rows from different files are stacked so "paragraph_nr" resets per file. 
     This way it always reflects the speech's position within its own meeting.
 
     Parameters
@@ -97,12 +97,12 @@ def parse_multiple_ft_xml(file_paths: list[str | Path]) -> pd.DataFrame:
     -------
     pd.DataFrame
         Combined dataframe with columns:
-        paragraph_index | date | name | party | role | text | source_file
+        paragraph_nr | date | speaker | party | role | text | source_file
     """
     frames = [parse_ft_xml(fp) for fp in file_paths]
     if not frames:
         return pd.DataFrame(
-            columns=["paragraph_index", "date", "name",
+            columns=["paragraph_nr", "date", "speaker",
                      "party", "role", "text", "source_file"]
         )
     return pd.concat(frames, ignore_index=True)
@@ -115,6 +115,10 @@ if __name__ == "__main__":
     folder_paths = [os.path.join(input_path, folder) for folder in folders_in_dir]
     files = [os.path.join(folder_path, file) for folder_path in folder_paths for file in os.listdir(folder_path)]
     df = parse_multiple_ft_xml(files)
+
+    # Excluding irrelevant data
+    df = df[df['role'] != "formand"] # Excluding formand as they represent no party and are therefore irrelevant
+    df = df[df["party"] != "MødeSlut"] # Exclude "MødeSlut" indicators (no data)
 
     outpath = os.path.join("..","..","..","..","data","csv_meetings")
     os.makedirs(outpath, exist_ok=True)
