@@ -18,7 +18,7 @@ import json
 import os 
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, TrainingArguments, Trainer, BitsAndBytesConfig
-from datasets import Dataset
+from datasets import Dataset, load_dataset
 from keras.losses import binary_crossentropy
 from sklearn.metrics import accuracy_score, f1_score, average_precision_score, recall_score, classification_report, confusion_matrix
 
@@ -31,13 +31,13 @@ def main():
    validation_data_path = os.path.join("..","Model_data","validation_set.json")
    train_data_path = os.path.join("..","data_making","raw_data","test_diff_hypothesis_agreemen","5_agreement.jsonl")
 
-   tokenized_val, tokenized_train, class_weights = load_data(model, input_path_val=validation_data_path, input_path_train=train_data_path)#"/work/Bachelor/Bachelor_project/Model_data/validation_set.json", "/work/Bachelor/Bachelor_project/Model_data/validation_set.json")
+   tokenized_eval, tokenized_train, class_weights = load_data(model, input_path=validation_data_path)
 
    trainer = WeightedLossTrainer(
       model=model.lora_model,
-      args=model.training_setup("../../output/checkpoints"), # This saves checkpoints to an output folder
+      args=model.training_setup("../../output/checkpoints"), # This saves checkpoints to an output folder outside GIT
       train_dataset=tokenized_train,
-      eval_dataset=tokenized_val,
+      eval_dataset=tokenized_eval,
       compute_metrics=model.compute_metrics,
       class_weights=class_weights
    )
@@ -55,13 +55,13 @@ def main():
 # %%
 class ModelInstantiation():
    def __init__(self, base_model_name=None, tokenizer=None, access_token=None):
-      self.base_model_name = base_model_name if base_model_name else "jhu-clsp/mmBERT-base" # For defaulting to BERT
-      self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name) if tokenizer is None else tokenizer
-      self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+      self.base_model_name = base_model_name if base_model_name else "jhu-clsp/mmBERT-base" # For defaulting to mmBERT but allowing for other models
+      self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name) if tokenizer is None else tokenizer # Using standard mmBERT tokenizer
+      self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # Flexible GPU Availability
       print(f'Running training on {self.device}')
       
+      # Hardcoded access token - bad practice
       self.access_token = access_token
-
       if self.access_token is not None:
          with open('/work/Bachelor/hugging_api.txt', 'r') as f: # Currently inflexible, should be changed to allow for access token to be None as well
             self.access_token = f.read().strip()
@@ -69,13 +69,13 @@ class ModelInstantiation():
       base_model = AutoModelForSequenceClassification.from_pretrained(
         self.base_model_name, # Full precision
         num_labels=2,
-        device_map="auto",
-        token = self.access_token # Watch me store my private access token in a public repo
+        device_map="auto", # Mapping to GPU
+        token = self.access_token
         )
 
       lora_config = LoraConfig(
-        r=32,
-        lora_alpha=64,
+        r=64,
+        lora_alpha=128,
         lora_dropout=0.05,
         target_modules="all-linear"
         )
@@ -114,15 +114,15 @@ class ModelInstantiation():
         remove_unused_columns=True,
         max_grad_norm=1.0,
         disable_tqdm=False,
-        load_best_model_at_end=True, # Loading best model based on standard f1
-        metric_for_best_model="f1",
-        greater_is_better=True,
+        load_best_model_at_end=True, # Loading best model based on weighted BCE on test set
+        metric_for_best_model="weighted_BCE",
+        greater_is_better=False,
       )
       return
 
    def weighted_bincrossentropy(self, true, pred, train_data):
-      label_counts = train_data['labels'].value_counts()
-      total = len(train_data)
+      label_counts = train_dataset['labels'].value_counts()
+      total = len(train_dataset)
       weight_for_0 = total / (2 * label_counts[0])
       weight_for_1 = total / (2 * label_counts[1])
 
@@ -150,7 +150,7 @@ class ModelInstantiation():
 
       return {
           'keras_BCE': keras_bce,
-          'weighted BCE': weighted_bce, 
+          'weighted_BCE': weighted_bce, 
           'recall': float(recall_score(labels, probs.round())),
           'precision': float(average_precision_score(labels, probs.round())),  # OBS CHANGE THIS
           'accuracy': float(accuracy_score(labels, probs.round())), # Rounding required as this only takes integers
@@ -191,25 +191,29 @@ def read_jsonl(file_path):
                records.append(json.loads(line))
    return records
 
-def load_data(model_instance, input_path_val, input_path_train):
-   val_data = pd.read_json(input_path_val)
-   val_data = val_data[['text', 'label']]
-   val_data.rename(columns={'label': 'labels'}, inplace=True)
-   val_dataset = Dataset.from_pandas(val_data)
-   tokenized_val = val_dataset.map(model_instance.tokenize_function, batched=True, num_proc=16)
+def load_data(model_instance, input_path):
+   # Loading data, renaming columns to what trainer expects, and converting to Dataset
+   data_records = read_jsonl(input_path)
+   data = pd.DataFrame(data_records) # Necessary to convert to dataframe for the following operations
+   data.rename(columns={'label': 'labels'}, inplace=True)
+   dataset = Dataset.from_pandas(data)
 
-   train_records = read_jsonl(input_path_train) # Be aware of different json formats for val and train sets right now
-   train_data = pd.DataFrame(train_records) # Necessary to convert to dataframe for the following operations
-   train_data = train_data[['text', 'label']]
-   train_data.rename(columns={'label': 'labels'}, inplace=True)
-   label_counts = train_data['labels'].value_counts()
-   total = len(train_data)
-   weight_for_0 = total / (2 * label_counts[0])
-   weight_for_1 = total / (2 * label_counts[1]) # Currently crashes as the input data contains no 1 labels - should theoretically be ready however
-   train_dataset = Dataset.from_pandas(train_data)
+   # Doing test train split
+   dataset = load_dataset.train_test_split(dataset, test_size=0.2, seed=42)
+   eval_dataset = dataset["test"]
+   train_dataset = dataset["train"]
+
+   # Tokenizing
+   tokenized_eval = eval_dataset.map(model_instance.tokenize_function, batched=True, num_proc=16)
    tokenized_train = train_dataset.map(model_instance.tokenize_function, batched=True, num_proc=16)
 
-   return tokenized_val, tokenized_train, torch.tensor([weight_for_0, weight_for_1], dtype=torch.float32) #Class weights
+   # Computing weights
+   label_counts = train_dataset['labels'].value_counts()
+   total = len(train_dataset)
+   weight_for_0 = total / (2 * label_counts[0])
+   weight_for_1 = total / (2 * label_counts[1]) # Currently crashes as the input data contains no 1 labels - should theoretically be ready however
+
+   return tokenized_eval, tokenized_train, torch.tensor([weight_for_0, weight_for_1], dtype=torch.float32) #Class weights
 
 
 # %%
