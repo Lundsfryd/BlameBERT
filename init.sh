@@ -4,7 +4,7 @@
 
 eval "$(/work/MarkusLundsfrydJensen#1865/miniconda3/bin/conda shell.bash hook)"
 conda init
-export MY_ENV=blame_bert
+export MY_ENV=blameBERT
 echo "conda activate $MY_ENV" >> ~/.bashrc
 
 
@@ -30,5 +30,5 @@ sudo apt-get update && sudo apt-get install -y git-lfs
 
 
 git lfs install
-cd "//work/MarkusLundsfrydJensen#1865/Bachelor_project"
+cd "/work/MarkusLundsfrydJensen#1865/Bachelor_project"
 git lfs pull

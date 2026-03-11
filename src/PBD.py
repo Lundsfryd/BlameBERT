@@ -7,16 +7,19 @@ import json
 from pathlib import Path
 import os
 import argparse
+from transformers.pipelines.pt_utils import KeyDataset
+from datasets import Dataset
 
 
 class DebateEntailment(object):
 
-    def __init__(self, inpath, outpath, batch_size = 2):
+    def __init__(self, inpath, outpath,hyp_templates, batch_size = 2):
 
         
         self.outpath = outpath
         self.batch_size = batch_size
         self.batch_index = 0  # tracks which record in self.records to start from for each batch
+        self.hyp_templates = hyp_templates
 
         self.read_jsonl(inpath)
         self.get_params()
@@ -26,8 +29,7 @@ class DebateEntailment(object):
     
     def get_template_info(self):
 
-        hypothesis_path = Path(os.path.join(".",
-                           "hypothesis_templates.txt"))
+        hypothesis_path = Path(self.hyp_templates)
 
         self.labels = ["blame", "praise", "neutral"]
         self.hypothesis_templates = self.read_file_lines(hypothesis_path)
@@ -45,9 +47,9 @@ class DebateEntailment(object):
 
         self.device = 0 if torch.cuda.is_available() else -1
         print(f"Device: {'cuda' if self.device == 0 else 'cpu'}")
-        print("remember to change to large. Currently base")
+        #print("remember to change to large. Currently base")
         # Use base model for speed (large is much slower)
-        self.pipe = pipeline("zero-shot-classification", model='mlburnham/Political_DEBATE_base_v1.0', device = self.device, batch_size = self.batch_size)
+        self.pipe = pipeline("zero-shot-classification", model='mlburnham/Political_DEBATE_large_v1.0', device = self.device, batch_size = self.batch_size)
         
 
         return
@@ -76,7 +78,7 @@ class DebateEntailment(object):
         return self.records
     
 
-    def evaluate_premise(self, doc):
+    '''def evaluate_premise(self, doc):
 
         return self.pipe(doc, self.labels, hypothesis_template=self.hypothesis_template, multi_label=True)
 
@@ -94,7 +96,27 @@ class DebateEntailment(object):
                 
             else:
                 print("Instance is not list...\n")
-        return #results
+        return #results'''
+
+    def blame_in_batch(self, sentences):
+        dataset = Dataset.from_dict({"text": sentences})
+        
+        outputs = []
+        for output in tqdm(
+            self.pipe(
+                KeyDataset(dataset, "text"),
+                candidate_labels=self.labels,           # ← add this
+                hypothesis_template=self.hypothesis_template,  # ← add this
+                multi_label=True,                       # ← add this
+                batch_size=self.batch_size
+            ),
+            total=len(sentences),
+            desc=f"Applying blame detection with hypothesis nr: {self.hypothesis_number}"
+        ):
+            outputs.append(output)
+        
+        result = self.blame_by_heuristics(outputs)
+        self.write_blame_to_jsonl(result)
     
     def blame_by_heuristics(self, blame_list):
 
@@ -173,7 +195,11 @@ def main():
     parser.add_argument("--output_path_jsonl", 
                         type=Path,
                         required=True) # add argument
-    
+
+    parser.add_argument("--hyp_temp_path", 
+                        type=Path,
+                        required=True) # add argument
+
     parser.add_argument("--batch_size", 
                         type=int,
                         default=2) # add argument
@@ -182,6 +208,7 @@ def main():
 
     DE = DebateEntailment(inpath=args.input_path_jsonl,
                       outpath=args.output_path_jsonl,
+                      hyp_templates=args.hyp_temp_path,
                       batch_size=args.batch_size)
 
     DE.run_hypothesis_entailment()

@@ -27,7 +27,7 @@ class TemplateManipulation(object):
 
     # --------------------------------------------------------------------#
 
-    def __init__(self, input_path, output_path, validation_size = 300, clean_keys = []):
+    def __init__(self, input_path, output_path, validation_size = 500, clean_keys = []):
 
         self.input_path = input_path
         self.output_path = output_path
@@ -35,10 +35,7 @@ class TemplateManipulation(object):
         self.validation_size = validation_size
         self.clean_keys = set(clean_keys)
         self.validation_path = os.path.join(self.outdir,
-                                            "training",
-                                            "validation",
-                                            "label_studio",
-                                            "initial_validation_set.jsonl")
+                                            "validation_set.jsonl")
 
         self.setup()
 
@@ -173,7 +170,7 @@ class TemplateManipulation(object):
         # if the directory is not present 
         # then create it.
         self.hyp_agree_outdir = os.path.join(self.outdir,
-                                     "test_diff_hypothesis_agreemen")
+                                     "diff_hypothesis_agreemen")
         
         print(f"Making output directory for datasets of different levels of agreement:\n{self.hyp_agree_outdir}\n")
 
@@ -343,10 +340,11 @@ class TemplateManipulation(object):
         plt.figure(figsize=(8, 4))
         plt.bar(pct_threshold.keys(), pct_threshold.values())
         plt.xlabel("Minimum hypothesis agreement")
-        plt.ylabel("Percentage of samples (%)")
-        plt.title("Agreement rate by threshold")
+        plt.ylabel("Percentage of samples labelled 1 (%)")
+        plt.title("Percentage of 1s by Agreement thresholds")
         plt.xticks(list(pct_threshold.keys()))
         plt.ylim(0, self.ylim)
+        plt.savefig(os.path.join(self.hyp_agree_outdir, "per_threshold_bar_plot.png"))
         plt.show()
 
         # per-hypothesis bar plot
@@ -356,6 +354,7 @@ class TemplateManipulation(object):
         plt.ylabel("Percentage of samples labeled 1 (%)")
         plt.title("Percentage of 1s per hypothesis")
         plt.ylim(0, self.ylim)
+        plt.savefig(os.path.join(self.hyp_agree_outdir, "per_hypothesis_bar_plot.png"))
         plt.show()
 
     def run_statistics(self, ylim = 10):
