@@ -11,10 +11,10 @@ import argparse
 from pathlib import Path
 from collections import Counter
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from transformers import AutoModelForSequenceClassification, AutoTokenizer, TrainingArguments, Trainer, BitsAndBytesConfig
+from transformers import AutoModelForSequenceClassification, AutoTokenizer, TrainingArguments, Trainer
 from datasets import Dataset, load_dataset
 from keras.losses import binary_crossentropy
-from sklearn.metrics import accuracy_score, f1_score, average_precision_score, recall_score, classification_report, confusion_matrix
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
 # %%
 def main():
@@ -34,7 +34,11 @@ def main():
 
    parser.add_argument("--output_path",
                      type=Path,
-                     required=False) # If not saving the model, no output required
+                     required=True)
+
+   parser.add_argument("--model_name",
+                     type=str,
+                     required=True)
 
    parser.add_argument("--save_model",
                      action="store_true",
@@ -42,32 +46,24 @@ def main():
 
    args = parser.parse_args()
 
-   if args.save_model:
-      print(f"Saving model to {args.output_path}")
-      print("Starting training..")
-   else:
-      print("Running training without saving")
-      print("Starting training..")
-
 # -----------------------------------------------------------------------------------------
 
    model = ModelInstantiation()
 
    input_path = args.data_input_path
    output_path = args.output_path
+   model_name = args.model_name
    
-   #input_path = os.path.join(
-      #"..",
-      #"..",
-     # "data",
-      #"3_5_agreement.jsonl"
-     # )
+   # Defining output outside git from argparse input
+   output_model_dir = os.path.join("..","..",output_path)
+   os.makedirs(output_model_dir, exist_ok=True)
+     
    # Load data function also returns class weights
    tokenized_eval, tokenized_train, class_weights = load_data(model, input_path=input_path)
 
    trainer = WeightedLossTrainer( # Custom trainer function taking class balance into account
       model=model.lora_model, # LoRA parameters
-      args=model.training_setup(f'{output_path}/checkpoints'), # This saves checkpoints to an output folder outside GIT
+      args=model.training_setup(output_path_checkpoints=f'{output_model_dir}/checkpoints/{model_name}'), # This saves checkpoints to an output folder outside GIT
       train_dataset=tokenized_train,
       eval_dataset=tokenized_eval,
       compute_metrics=model.compute_metrics, # Custom metrics function
@@ -77,10 +73,13 @@ def main():
    trainer.train()
 
    # Saving
-   #output_model_dir = os.path.join("..","..","output","full_model")
-   os.makedirs(args.output_path, exist_ok=True)
-   saved_model = trainer.model
-   saved_model.save_pretrained(f'{args.output_path}/full_model')
+   if args.save_model:
+      print(f"\n\n#### Saving full model to {output_model_dir}/full_models/{model_name} ####\n\n")
+      saved_model = trainer.model
+      saved_model.save_pretrained(f'{output_model_dir}/full_models/{model_name}')
+   else:
+      print("\n\n#### No full model saved#### \n\n")
+
 
 # %%
 class ModelInstantiation():
@@ -88,19 +87,12 @@ class ModelInstantiation():
       self.base_model_name = base_model_name if base_model_name else "jhu-clsp/mmBERT-base" # For defaulting to mmBERT but allowing for other models
       self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name) if tokenizer is None else tokenizer # Using standard mmBERT tokenizer
       self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu") # Flexible GPU Availability
-      print(f'Running training on {self.device}')
-      
-      # Hardcoded access token - bad practice
-      self.access_token = access_token
-      if self.access_token is not None:
-         with open('/work/Bachelor/hugging_api.txt', 'r') as f: # Currently inflexible, should be changed to allow for access token to be None as well
-            self.access_token = f.read().strip()
+      print(f'\n\n#### Running training on {self.device} ####\n\n')
 
       base_model = AutoModelForSequenceClassification.from_pretrained(
         self.base_model_name, # Full precision
-        num_labels=2,
-        device_map="auto", # Mapping to GPU if available
-        token = self.access_token
+        num_labels=2, # Binary classification
+        device_map="auto" # Mapping to GPU if available
         )
 
       lora_config = LoraConfig(
@@ -110,7 +102,7 @@ class ModelInstantiation():
         target_modules="all-linear"
         )
 
-      lora_model = prepare_model_for_kbit_training(base_model)
+      lora_model = prepare_model_for_kbit_training(base_model) # Preparing for lora
       for name, param in lora_model.named_parameters():
         if 'lora' in name.lower():
            param.requires_grad = True
@@ -124,12 +116,13 @@ class ModelInstantiation():
         examples["text"],
         padding="max_length",
         truncation=True,
-        max_length=512,
+        max_length=512, # Tokenizing to 512 and truncating above. It looks at 1 sentence at a time.
       )
       return encoded
 
    def training_setup(self, output_path_checkpoints=None):
       self.training_args = TrainingArguments(
+         report_to="wandb",
         output_dir=output_path_checkpoints,
         learning_rate=1e-5,
         num_train_epochs=3,
@@ -148,21 +141,16 @@ class ModelInstantiation():
         metric_for_best_model="weighted_BCE",
         greater_is_better=False,
       )
-      return
+      return self.training_args
 
    def weighted_bincrossentropy(self, true, pred, train_data):
+      # Calculates weighted binary cross entropy. The weights represent actual imbalance in data.
       label_counts = Counter(train_dataset['labels'])
       total = len(train_dataset)
+
+      # Counting labels and computing weights
       weight_for_0 = total / (2 * label_counts[0])
       weight_for_1 = total / (2 * label_counts[1])
-
-      """
-      Calculates weighted binary cross entropy. The weights are fixed to represent class imbalance in the dataset.
-
-      For example if there are 10x as many positive classes as negative classes,
-          if you adjust weight_zero = 1.0, weight_one = 0.1, then false positives
-          will be penalized 10 times as much as false negatives.
-      """
       bin_crossentropy = binary_crossentropy(true, pred)
       weights = true * weight_for_1 + (1. - true) * weight_for_0
       weighted_bin_crossentropy = weights * bin_crossentropy
@@ -182,7 +170,7 @@ class ModelInstantiation():
           'keras_BCE': keras_bce,
           'weighted_BCE': weighted_bce, 
           'recall': float(recall_score(labels, probs.round())),
-          'precision': float(average_precision_score(labels, probs.round())),  # OBS CHANGE THIS
+          'precision': float(precision_score(labels, probs.round())),
           'accuracy': float(accuracy_score(labels, probs.round())), # Rounding required as this only takes integers
           'f1': float(f1_score(labels, probs.round(), average='macro')), # Macro f1 is best for imbalanced data
           'number_of_true_preds': sum(probs.round()),
@@ -208,7 +196,7 @@ class WeightedLossTrainer(Trainer):
 # %%
 def read_jsonl(file_path):
    """Read a jsonl file and return a list of records."""
-   print(f"Reading {file_path} .jsonl file...")
+   print(f'\n\n#### Reading "{file_path}" for training / test data (90/10 split) ####\n\n')
    records = []
    with open(file_path, 'r', encoding='utf-8') as f:
       for line in f:
