@@ -1,12 +1,3 @@
-'''
-To do:
-- Random sampling rather than time based
-- DaCy segmentation
-- Larger training set?
-- No more effective batch sizing, actual batching at 256
-- Slightly larger validation set (500?)
-'''
-
 # %%
 import torch
 import torch.nn as nn
@@ -16,7 +7,8 @@ import pandas as pd
 import keras
 import json
 import os 
-import wandb
+import argparse
+from pathlib import Path
 from collections import Counter
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, TrainingArguments, Trainer, BitsAndBytesConfig
@@ -26,37 +18,69 @@ from sklearn.metrics import accuracy_score, f1_score, average_precision_score, r
 
 # %%
 def main():
-   model = ModelInstantiation()
 
-   # Loading data, for testing i am using 5 labelled data
-   # Load data function also returns class weights
-   input_path = os.path.join(
-      "..",
-      "..",
-      "data",
-      "3_5_agreement.jsonl"
+   parser = argparse.ArgumentParser(
+      prog="mmBERT training pipeline",
+      description="LoRA style fine tuning on Danish political texts"
    )
 
+   parser.add_argument("--data_input_path",
+                     type=Path,
+                     required=True)
+
+   parser.add_argument("--validation_input_path",
+                     type=Path,
+                     required=False) # Should be required when doing actual validation
+
+   parser.add_argument("--output_path",
+                     type=Path,
+                     required=False) # If not saving the model, no output required
+
+   parser.add_argument("--save_model",
+                     action="store_true",
+                     help="boolean flag to save final model or not, defaults to false")
+
+   args = parser.parse_args()
+
+   if args.save_model:
+      print(f"Saving model to {args.output_path}")
+      print("Starting training..")
+   else:
+      print("Running training without saving")
+      print("Starting training..")
+
+# -----------------------------------------------------------------------------------------
+
+   model = ModelInstantiation()
+
+   input_path = args.data_input_path
+   output_path = args.output_path
+   
+   #input_path = os.path.join(
+      #"..",
+      #"..",
+     # "data",
+      #"3_5_agreement.jsonl"
+     # )
+   # Load data function also returns class weights
    tokenized_eval, tokenized_train, class_weights = load_data(model, input_path=input_path)
 
-   trainer = WeightedLossTrainer(
-      model=model.lora_model,
-      args=model.training_setup("../../output/checkpoints"), # This saves checkpoints to an output folder outside GIT
+   trainer = WeightedLossTrainer( # Custom trainer function taking class balance into account
+      model=model.lora_model, # LoRA parameters
+      args=model.training_setup(f'{output_path}/checkpoints'), # This saves checkpoints to an output folder outside GIT
       train_dataset=tokenized_train,
       eval_dataset=tokenized_eval,
-      compute_metrics=model.compute_metrics,
-      class_weights=class_weights
+      compute_metrics=model.compute_metrics, # Custom metrics function
+      class_weights=class_weights # Weighted by presence in dataset 
    )
 
    trainer.train()
 
    # Saving
-   output_model_dir = os.path.join("..","..","output","full_model")
-   os.makedirs(output_model_dir, exist_ok=True)
+   #output_model_dir = os.path.join("..","..","output","full_model")
+   os.makedirs(args.output_path, exist_ok=True)
    saved_model = trainer.model
-   saved_model.save_pretrained(output_model_dir)
-
-
+   saved_model.save_pretrained(f'{args.output_path}/full_model')
 
 # %%
 class ModelInstantiation():
@@ -75,7 +99,7 @@ class ModelInstantiation():
       base_model = AutoModelForSequenceClassification.from_pretrained(
         self.base_model_name, # Full precision
         num_labels=2,
-        device_map="auto", # Mapping to GPU
+        device_map="auto", # Mapping to GPU if available
         token = self.access_token
         )
 
@@ -120,7 +144,7 @@ class ModelInstantiation():
         remove_unused_columns=True,
         max_grad_norm=1.0,
         disable_tqdm=False,
-        load_best_model_at_end=True, # Loading best model based on weighted BCE on test set
+        load_best_model_at_end=True, # Loading best model based on weighted BCE on evaluation set (90/10 split)
         metric_for_best_model="weighted_BCE",
         greater_is_better=False,
       )
@@ -165,8 +189,6 @@ class ModelInstantiation():
           'number_of_true_labels': sum(labels)
       }
 
-
-
 class WeightedLossTrainer(Trainer):
     def __init__(self, *args, class_weights=None, **kwargs):
         super().__init__(*args, **kwargs)
@@ -185,10 +207,8 @@ class WeightedLossTrainer(Trainer):
 
 # %%
 def read_jsonl(file_path):
-
    """Read a jsonl file and return a list of records."""
-
-   print("Reading input .jsonl file...\n")
+   print(f"Reading {file_path} .jsonl file...")
    records = []
    with open(file_path, 'r', encoding='utf-8') as f:
       for line in f:
@@ -206,13 +226,13 @@ def load_data(model_instance, input_path):
    dataset = Dataset.from_pandas(data)
 
    # Doing test train split
-   dataset = dataset.train_test_split(test_size=0.2, seed=42)
+   dataset = dataset.train_test_split(test_size=0.1, seed=42)
    eval_dataset = dataset["test"]
    train_dataset = dataset["train"]
 
    # Tokenizing
-   tokenized_eval = eval_dataset.map(model_instance.tokenize_function, batched=True)#, num_proc=16)
-   tokenized_train = train_dataset.map(model_instance.tokenize_function, batched=True)#, num_proc=16)
+   tokenized_eval = eval_dataset.map(model_instance.tokenize_function, batched=True)
+   tokenized_train = train_dataset.map(model_instance.tokenize_function, batched=True)
 
    # Computing weights
    label_counts = Counter(train_dataset['labels'])
