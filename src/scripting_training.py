@@ -16,6 +16,8 @@ import pandas as pd
 import keras
 import json
 import os 
+import wandb
+from collections import Counter
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, TrainingArguments, Trainer, BitsAndBytesConfig
 from datasets import Dataset, load_dataset
@@ -28,10 +30,14 @@ def main():
 
    # Loading data, for testing i am using 5 labelled data
    # Load data function also returns class weights
-   validation_data_path = os.path.join("..","Model_data","validation_set.json")
-   train_data_path = os.path.join("..","data_making","raw_data","test_diff_hypothesis_agreemen","5_agreement.jsonl")
+   input_path = os.path.join(
+      "..",
+      "..",
+      "data",
+      "3_5_agreement.jsonl"
+   )
 
-   tokenized_eval, tokenized_train, class_weights = load_data(model, input_path=validation_data_path)
+   tokenized_eval, tokenized_train, class_weights = load_data(model, input_path=input_path)
 
    trainer = WeightedLossTrainer(
       model=model.lora_model,
@@ -121,7 +127,7 @@ class ModelInstantiation():
       return
 
    def weighted_bincrossentropy(self, true, pred, train_data):
-      label_counts = train_dataset['labels'].value_counts()
+      label_counts = Counter(train_dataset['labels'])
       total = len(train_dataset)
       weight_for_0 = total / (2 * label_counts[0])
       weight_for_1 = total / (2 * label_counts[1])
@@ -194,24 +200,25 @@ def read_jsonl(file_path):
 def load_data(model_instance, input_path):
    # Loading data, renaming columns to what trainer expects, and converting to Dataset
    data_records = read_jsonl(input_path)
-   data = pd.DataFrame(data_records) # Necessary to convert to dataframe for the following operations
+   data = pd.DataFrame(data_records)
+   data = data[["text","label"]] # Necessary to convert to dataframe for the following operations
    data.rename(columns={'label': 'labels'}, inplace=True)
    dataset = Dataset.from_pandas(data)
 
    # Doing test train split
-   dataset = load_dataset.train_test_split(dataset, test_size=0.2, seed=42)
+   dataset = dataset.train_test_split(test_size=0.2, seed=42)
    eval_dataset = dataset["test"]
    train_dataset = dataset["train"]
 
    # Tokenizing
-   tokenized_eval = eval_dataset.map(model_instance.tokenize_function, batched=True, num_proc=16)
-   tokenized_train = train_dataset.map(model_instance.tokenize_function, batched=True, num_proc=16)
+   tokenized_eval = eval_dataset.map(model_instance.tokenize_function, batched=True)#, num_proc=16)
+   tokenized_train = train_dataset.map(model_instance.tokenize_function, batched=True)#, num_proc=16)
 
    # Computing weights
-   label_counts = train_dataset['labels'].value_counts()
+   label_counts = Counter(train_dataset['labels'])
    total = len(train_dataset)
    weight_for_0 = total / (2 * label_counts[0])
-   weight_for_1 = total / (2 * label_counts[1]) # Currently crashes as the input data contains no 1 labels - should theoretically be ready however
+   weight_for_1 = total / (2 * label_counts[1]) # Crashes with division by 0 error if no 1 labels, but will not happen in practice
 
    return tokenized_eval, tokenized_train, torch.tensor([weight_for_0, weight_for_1], dtype=torch.float32) #Class weights
 
