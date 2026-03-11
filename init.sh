@@ -14,23 +14,21 @@ BASE_DIR="/work/MarkusLundsfrydJensen#1865"
 
 cd "$BASE_DIR"
 
-# Install GCM if not present
-# now delete any existing gcm files before installing Git Credential Manager. 
-if ls *amd* 1> /dev/null 2>&1; then
-    echo "GCM files found...deleting before installing new GCM"
-    rm *amd*
+
+# Checking for existing git installations. No longer falls back to a new download each time
+if ls amd 1> /dev/null 2>&1; then
+    echo "Existing GCM installation found...configuring"
+    git-credential-manager-core configure
 else
-    echo "No files with 'string' found"
+    echo "No existing GCM found, downloading and installing..."
+    wget https://github.com/GitCredentialManager/git-credential-manager/releases/download/v2.0.785/gcm-linux_amd64.2.0.785.deb
+    sudo dpkg -i gcm-linux_amd64.2.0.785.deb
+    git-credential-manager-core configure
 fi
 
-#Now git setup.
-wget https://github.com/GitCredentialManager/git-credential-manager/releases/download/v2.0.785/gcm-linux_amd64.2.0.785.deb
-sudo dpkg -i gcm-linux_amd64.2.0.785.deb
-
-# now configure credential manager. 
-git-credential-manager-core configure
-
 sudo apt-get update && sudo apt-get install -y git-lfs
+
+
 git lfs install
-cd /work/MarkusLundsfrydJensen#1865/Bachelor_project
+cd "//work/MarkusLundsfrydJensen#1865/Bachelor_project"
 git lfs pull
