@@ -14,7 +14,7 @@ from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, TrainingArguments, Trainer
 from datasets import Dataset, load_dataset
 from keras.losses import binary_crossentropy
-from sklearn.metrics import accuracy_score, f1_score, average_precision_score, recall_score
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
 # %%
 def main():
@@ -122,6 +122,7 @@ class ModelInstantiation():
 
    def training_setup(self, output_path_checkpoints=None):
       self.training_args = TrainingArguments(
+         report_to="wandb",
         output_dir=output_path_checkpoints,
         learning_rate=1e-5,
         num_train_epochs=3,
@@ -169,7 +170,7 @@ class ModelInstantiation():
           'keras_BCE': keras_bce,
           'weighted_BCE': weighted_bce, 
           'recall': float(recall_score(labels, probs.round())),
-          'precision': float(average_precision_score(labels, probs.round())),
+          'precision': float(precision_score(labels, probs.round())),
           'accuracy': float(accuracy_score(labels, probs.round())), # Rounding required as this only takes integers
           'f1': float(f1_score(labels, probs.round(), average='macro')), # Macro f1 is best for imbalanced data
           'number_of_true_preds': sum(probs.round()),
