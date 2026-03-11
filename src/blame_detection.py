@@ -2,28 +2,35 @@ import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 from tqdm import tqdm
 import numpy as np
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, classification_report, confusion_matrix
 
 class BlameDetector(object):
 
-    def __init__(self, model_path, max_length=512, batch_size=32):
+    def __init__(self, model_path, max_length=512, batch_size=32, model_from_path = True):
 
         self.model_path = model_path
         self.max_length = max_length
         self.batch_size = batch_size
+        self.model_from_path = model_from_path
 
         self.model_initialization()
 
         return
 
     def model_initialization(self):
-        self.model = AutoModelForSequenceClassification.from_pretrained(
-            self.model_path,
-            device_map='auto'
-        )
+        if self.model_from_path == True:
+            self.model = AutoModelForSequenceClassification.from_pretrained(
+                self.model_path,
+                device_map='auto'
+            )
+
+            self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
+
+        elif self.model_from_path == False:
+            self.model = self.model_path
+            self.tokenizer = AutoTokenizer.from_pretrained("jhu-clsp/mmBERT-base")
 
         self.model.eval()
-
-        self.tokenizer = AutoTokenizer.from_pretrained(self.model_path)
         
         # Move to GPU if available
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -210,3 +217,31 @@ class BlameDetector(object):
         self._save_jsonl(results, output_path)
 
         return results
+    
+
+    def compute_metrics(self, eval_pred):
+
+        predictions, labels = eval_pred
+        
+        # Wrapping all metrics to floats for json serialization during model eval
+        return {
+            'recall': float(recall_score(labels, predictions)),
+            'precision': float(precision_score(labels, predictions)), #OBS CHANGE THIS
+            'accuracy': float(accuracy_score(labels, predictions)), # Need rounding for these two computations (integer required)
+            'f1': float(f1_score(labels, predictions, average='macro')), # macro f1 is better for imbalanced dataset
+            'number_of_true_preds': sum(predictions),
+            'number_of_true_labels': sum(labels)
+        }
+    
+    def run_validation(self, validation_path):
+
+        result = self.predict_from_jsonl(validation_path)
+
+        true_labels = [entry["label"] for entry in result]
+        print(f"true labels: {sum(true_labels)}")
+        predictions = [entry["prediction"] for entry in result]
+        print(f"predicted trues: {sum(predictions)}")
+
+        evaluation = (predictions, true_labels)
+
+        return self.compute_metrics(evaluation)
