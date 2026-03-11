@@ -68,7 +68,7 @@ class SentenceSegmentation(object):
                 "party": current_row["party"],
                 "paragraph_nr": para,
                 "sentence_nr": i,
-                "partyfacys_ID": current_row["partyfacts_ID"],
+                #"partyfacys_ID": current_row["partyfacts_ID"],
                 "text": str(sent)
             }
             
