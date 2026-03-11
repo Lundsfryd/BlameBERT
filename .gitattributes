@@ -1,1 +1,2 @@
 data/inference/inference_data.jsonl filter=lfs diff=lfs merge=lfs -text
+data/raw_data/Corp_Folketing_V2.csv filter=lfs diff=lfs merge=lfs -text
