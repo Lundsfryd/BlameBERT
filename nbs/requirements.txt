@@ -14,7 +14,7 @@ scikit-learn
 datasets
 accelerate
 keras
-tesnorflow
+tensorflow
 peft
 datasets
 wandb

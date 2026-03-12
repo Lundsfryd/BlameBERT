@@ -233,15 +233,23 @@ class BlameDetector(object):
             'number_of_true_labels': sum(labels)
         }
     
-    def run_validation(self, validation_path):
+    def run_validation(self, validation_path, report_output_path = None):
 
         result = self.predict_from_jsonl(validation_path)
 
         true_labels = [entry["label"] for entry in result]
-        print(f"true labels: {sum(true_labels)}")
         predictions = [entry["prediction"] for entry in result]
-        print(f"predicted trues: {sum(predictions)}")
 
-        evaluation = (predictions, true_labels)
+        report = classification_report(true_labels, predictions)
+        
+        print(report)
+
+        if report_output_path is not None:
+            with open(report_output_path, "a") as f:  # "a" to append, not overwrite
+                f.write("\n=== Validation Set Report ===\n\n")
+                f.write(report)
+            print(f"Validation report appended to {report_output_path}")
+
+            evaluation = (predictions, true_labels)
 
         return self.compute_metrics(evaluation)

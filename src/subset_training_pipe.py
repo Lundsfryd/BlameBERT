@@ -2,35 +2,58 @@
 import os
 from pathlib import Path
 
-from scripting_training import model_trainer
+from training_pipe import model_trainer
 from blame_detection import BlameDetector
+import torch
 
-training_data_path = Path("")
-validation_data_path = Path("")
 
-#make subset
+base_dir = Path("/work/MarkusLundsfrydJensen#1865/data_outside_git")
 
-print("starting model trainer")
-model = model_trainer(data_input_path = training_data_path,
-        output_dir = os.path.join("..",
-                                   "..",
-                                   "Data_outside_git",
-                                   "training_output")
-        model_name = "test_model", 
+validation_data_path = os.path.join(base_dir,
+                            "training_data",
+                            "validation_set.jsonl")
+
+train_data_dir = os.path.join(base_dir,
+                                "training_data",
+                                "diff_hypothesis_agreemen")
+
+output_dir = os.path.join(base_dir,
+                        "training_output")
+
+datasets = [ # Obviously five different datasets in future, doing this to test the loop
+    {"path": Path(os.path.join(train_data_dir, "1_5_agreement.jsonl" )), "model_name": "data_1_5"},
+    {"path": Path(os.path.join(train_data_dir, "2_5_agreement.jsonl" )), "model_name": "data_2_5"},
+    {"path": Path(os.path.join(train_data_dir, "3_5_agreement.jsonl" )), "model_name": "data_3_5"},
+    {"path": Path(os.path.join(train_data_dir, "4_5_agreement.jsonl" )), "model_name": "data_4_5"},
+    {"path": Path(os.path.join(train_data_dir, "5_agreement.jsonl" )), "model_name": "data_5"},
+]
+
+######## RUN TRAINING LOOOP HERE ###########
+for ds in datasets[:1]:
+    print(f"\n\n#### Training on {ds['model_name']} ####\n\n")
+
+    report_path = os.path.join(output_dir,F"model_on_{ds["model_name"]}_report.txt")
+
+
+    model = model_trainer(data_input_path = ds["path"],
+        output_dir = output_dir,
+        model_name = ds["model_name"], 
         save_model = False,
-        subset = 512)
+        subset = 10000,
+        report_path=report_path  # new argument
+        )
 
-#run validation on best model
-print("running validation")
+    #run validation on best model
+    print("running validation")
 
-detector = BlameDetector(
-    model_path=model,
-    max_length=512,
-    batch_size=64,
-    model_from_path = False
-)
+    detector = BlameDetector(
+        model_path=model,
+        max_length=512,
+        batch_size=64,
+        model_from_path = False
+    )
 
-detector.run_validation(validation_data_path)
+    detector.run_validation(validation_data_path, report_path)
 
 
 # %%

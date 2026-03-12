@@ -50,11 +50,11 @@ def main():
     )
 
 
-def model_trainer(data_input_path, output_dir, model_name, save_model=False, subset = None):
+def model_trainer(data_input_path, output_dir, model_name, save_model=False, subset = None, report_path = None, learning_rate = 1e-5, batch_size = 64):
 
     # -----------------------------------------------------------------------------------------
 
-    model = ModelInstantiation()
+    model = ModelInstantiation(learning_rate = learning_rate, batch_size = batch_size)
 
     os.environ["WANDB_PROJECT"] = "mmbert-danish-politics"  # groups runs under a project
     os.environ["WANDB_RUN_NAME"] = model_name  
@@ -64,8 +64,10 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
     os.makedirs(output_model_dir, exist_ok=True)
 
     # Load data function also returns class weights
+    print("tokenizing dataset...")
     tokenized_eval, tokenized_train, class_weights = load_data(model, input_path=data_input_path, subset=subset)
 
+    print("initializing trainger")
     trainer = WeightedLossTrainer(  # Custom trainer function taking class balance into account
         model=model.lora_model,  # LoRA parameters
         args=model.training_setup(
@@ -77,16 +79,40 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
         class_weights=class_weights  # Weighted by presence in dataset
     )
 
+    print("trainer.train")
     trainer.train()
+    print("training done")
 
-    # Saving
+    if report_path is not None:
+        from sklearn.metrics import classification_report
+        import tensorflow as tf
+        
+        # Force Keras/TF to CPU to avoid CUDA handle conflict with PyTorch
+        with tf.device('/CPU:0'):
+            predictions_output = trainer.predict(tokenized_eval)
+        
+        preds = np.exp(predictions_output.predictions)
+        preds = (preds / preds.sum(axis=1, keepdims=True))[:, 1].round().astype(int)
+        labels = predictions_output.label_ids
+
+        os.makedirs(Path(report_path).parent, exist_ok=True)
+        with open(report_path, "w") as f:
+            f.write(f"=== Best Epoch Report: {model_name} ===\n\n")
+            f.write(classification_report(labels, preds))
+
+
+     #saving
     if save_model:
         save_dir = output_model_dir / "full_models" / model_name
         print(f"\n\n#### Saving full model to {save_dir} ####\n\n")
         os.makedirs(save_dir, exist_ok=True)
         trainer.model.save_pretrained(str(save_dir))
     else:
-        print("\n\n#### No full model saved ####\n\n")
+        # Remove checkpoints directory if we don't want anything saved
+        import shutil
+        checkpoint_dir = output_model_dir / "checkpoints" / model_name
+        if checkpoint_dir.exists():
+            shutil.rmtree(checkpoint_dir)
 
     # FIX 2: Return the model so it can be used for inference immediately
     return trainer.model
@@ -94,10 +120,12 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
 
 # %%
 class ModelInstantiation():
-    def __init__(self, base_model_name=None, tokenizer=None):
+    def __init__(self, learning_rate = 1e-5, batch_size = 64,base_model_name=None, tokenizer=None):
         self.base_model_name = base_model_name if base_model_name else "jhu-clsp/mmBERT-base"
         self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name) if tokenizer is None else tokenizer
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.learning_rate = learning_rate
+        self.batch_size = batch_size
         print(f'\n\n#### Running training on {self.device} ####\n\n')
 
         base_model = AutoModelForSequenceClassification.from_pretrained(
@@ -133,14 +161,14 @@ class ModelInstantiation():
       self.training_args = TrainingArguments(
          report_to="wandb",
          output_dir=output_path_checkpoints,
-         learning_rate=1e-5,
+         learning_rate=self.learning_rate,
          num_train_epochs=3,
-         per_device_train_batch_size=256,
+         per_device_train_batch_size=self.batch_size,
          logging_steps=1,
-         eval_strategy="steps",
-         save_strategy="steps",
-         eval_steps=500,
-         save_steps=500,
+         eval_strategy="epochs",
+         save_strategy="epochs",
+         #eval_steps=500,
+         #save_steps=500,
          dataloader_pin_memory=True,
          dataloader_num_workers=8,
          remove_unused_columns=True,
@@ -235,7 +263,9 @@ def load_data(model_instance, input_path, subset = None):
     data.rename(columns={'label': 'labels'}, inplace=True)
 
     if subset is not None:
-        data = data.sample(n=subset, random_state=42)
+        df_0 = data[data['labels'] == 0].sample(n=subset // 2, random_state=42)
+        df_1 = data[data['labels'] == 1].sample(n=subset // 2, random_state=42)
+        data = pd.concat([df_0, df_1]).sample(frac=1, random_state=42).reset_index(drop=True)
 
     dataset = Dataset.from_pandas(data)
 
