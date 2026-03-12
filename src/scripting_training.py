@@ -17,8 +17,8 @@ from keras.losses import binary_crossentropy
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 
 # %%
-def main():
 
+def main():
    parser = argparse.ArgumentParser(
       prog="mmBERT training pipeline",
       description="LoRA style fine tuning on Danish political texts"
@@ -46,20 +46,24 @@ def main():
 
    args = parser.parse_args()
 
+   model_trainer(data_input_path = args.data_input_path,
+           output_path = args.output_path, 
+           model_name = args.model_name, 
+           save_model = args.save_model)
+
+
+def model_trainer(data_input_path,output_path, model_name, save_model = False):
+
 # -----------------------------------------------------------------------------------------
 
    model = ModelInstantiation()
-
-   input_path = args.data_input_path
-   output_path = args.output_path
-   model_name = args.model_name
    
    # Defining output outside git from argparse input
    output_model_dir = os.path.join("..","..",output_path)
    os.makedirs(output_model_dir, exist_ok=True)
      
    # Load data function also returns class weights
-   tokenized_eval, tokenized_train, class_weights = load_data(model, input_path=input_path)
+   tokenized_eval, tokenized_train, class_weights = load_data(model, input_path=data_input_path)
 
    trainer = WeightedLossTrainer( # Custom trainer function taking class balance into account
       model=model.lora_model, # LoRA parameters
@@ -73,12 +77,14 @@ def main():
    trainer.train()
 
    # Saving
-   if args.save_model:
+   if save_model:
       print(f"\n\n#### Saving full model to {output_model_dir}/full_models/{model_name} ####\n\n")
       saved_model = trainer.model
       saved_model.save_pretrained(f'{output_model_dir}/full_models/{model_name}')
    else:
       print("\n\n#### No full model saved#### \n\n")
+
+   return trainer.model
 
 
 # %%
@@ -122,7 +128,7 @@ class ModelInstantiation():
 
    def training_setup(self, output_path_checkpoints=None):
       self.training_args = TrainingArguments(
-         report_to="wandb",
+       #  report_to="wandb",
         output_dir=output_path_checkpoints,
         learning_rate=1e-5,
         num_train_epochs=3,
@@ -145,8 +151,8 @@ class ModelInstantiation():
 
    def weighted_bincrossentropy(self, true, pred, train_data):
       # Calculates weighted binary cross entropy. The weights represent actual imbalance in data.
-      label_counts = Counter(train_dataset['labels'])
-      total = len(train_dataset)
+      label_counts = Counter(train_data['labels'])
+      total = len(train_data)
 
       # Counting labels and computing weights
       weight_for_0 = total / (2 * label_counts[0])
