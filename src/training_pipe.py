@@ -50,7 +50,7 @@ def main():
     )
 
 
-def model_trainer(data_input_path, output_dir, model_name, save_model=False):
+def model_trainer(data_input_path, output_dir, model_name, save_model=False, subset = None):
 
     # -----------------------------------------------------------------------------------------
 
@@ -64,7 +64,7 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False):
     os.makedirs(output_model_dir, exist_ok=True)
 
     # Load data function also returns class weights
-    tokenized_eval, tokenized_train, class_weights = load_data(model, input_path=data_input_path)
+    tokenized_eval, tokenized_train, class_weights = load_data(model, input_path=data_input_path, subset=subset)
 
     trainer = WeightedLossTrainer(  # Custom trainer function taking class balance into account
         model=model.lora_model,  # LoRA parameters
@@ -227,12 +227,16 @@ def read_jsonl(file_path):
     return records
 
 
-def load_data(model_instance, input_path):
+def load_data(model_instance, input_path, subset = None):
     # Loading data, renaming columns to what trainer expects, and converting to Dataset
     data_records = read_jsonl(input_path)
     data = pd.DataFrame(data_records)
     data = data[["text", "label"]]
     data.rename(columns={'label': 'labels'}, inplace=True)
+
+    if subset is not None:
+        data = data.sample(n=subset, random_state=42)
+
     dataset = Dataset.from_pandas(data)
 
     # 90/10 train/eval split
