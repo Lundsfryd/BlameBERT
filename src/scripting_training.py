@@ -128,7 +128,7 @@ class ModelInstantiation():
 
    def training_setup(self, output_path_checkpoints=None):
       self.training_args = TrainingArguments(
-       #  report_to="wandb",
+         report_to="wandb",
         output_dir=output_path_checkpoints,
         learning_rate=1e-5,
         num_train_epochs=3,

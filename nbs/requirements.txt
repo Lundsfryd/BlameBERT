@@ -12,3 +12,9 @@ argparse
 statsmodels
 scikit-learn
 datasets
+accelerate
+keras
+tesnorflow
+peft
+datasets
+wandb
