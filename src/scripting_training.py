@@ -25,22 +25,31 @@ def main():
    )
 
    parser.add_argument("--data_input_path",
+                     "-d_in",
                      type=Path,
-                     required=True)
+                     required=True,
+                     help="input path to a jsonl file for processing to training dataset")
 
    parser.add_argument("--validation_input_path",
+                     "-v_in",
                      type=Path,
-                     required=False) # Should be required when doing actual validation
+                     required=False,
+                     help="input path to a jsonl file used for validating the model")
 
    parser.add_argument("--output_path",
+                     "-o",
                      type=Path,
-                     required=True)
+                     required=True,
+                     help="output path to both model checkpoints and full model saving, depending on the save model flag")
 
    parser.add_argument("--model_name",
+                     "-name",
                      type=str,
-                     required=True)
+                     required=True,
+                     help="name of the saved model, both full model, checkpoints, and wandb will save with this name")
 
    parser.add_argument("--save_model",
+                     "-s",
                      action="store_true",
                      help="boolean flag to save final model or not, defaults to false")
 
