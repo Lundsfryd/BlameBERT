@@ -19,51 +19,70 @@ from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_sc
 # %%
 
 def main():
-   parser = argparse.ArgumentParser(
-      prog="mmBERT training pipeline",
-      description="LoRA style fine tuning on Danish political texts"
-   )
+    parser = argparse.ArgumentParser(
+        prog="mmBERT training pipeline",
+        description="LoRA style fine tuning on Danish political texts"
+    )
 
-   parser.add_argument("--data_input_path",
-                     "-d_in",
-                     type=Path,
-                     required=True,
-                     help="input path to a jsonl file for processing to training dataset")
+    parser.add_argument("--data_input_path",
+                        "-d_in",
+                        type=Path,
+                        required=True,
+                        help="input path to a jsonl file for processing to training dataset")
 
-   parser.add_argument("--validation_input_path",
-                     "-v_in",
-                     type=Path,
-                     required=False,
-                     help="input path to a jsonl file used for validating the model")
+    parser.add_argument("--validation_input_path",
+                        "-v_in",
+                        type=Path,
+                        required=False,
+                        help="input path to a jsonl file used for validating the model")
 
-   parser.add_argument("--output_path",
-                     "-o",
-                     type=Path,
-                     required=True,
-                     help="output path to both model checkpoints and full model saving, depending on the save model flag")
+    parser.add_argument("--output_path",
+                        "-o",
+                        type=Path,
+                        required=True,
+                        help="output path to both model checkpoints and full model saving, depending on the save model flag")
 
-   parser.add_argument("--model_name",
-                     "-name",
-                     type=str,
-                     required=True,
-                     help="name of the saved model, both full model, checkpoints, and wandb will save with this name")
+    parser.add_argument("--model_name",
+                        "-name",
+                        type=str,
+                        required=True,
+                        help="name of the saved model, both full model, checkpoints, and wandb will save with this name")
 
-   parser.add_argument("--save_model",
-                     "-s",
-                     action="store_true",
-                     help="boolean flag to save final model or not, defaults to false")
+    parser.add_argument("--save_model",
+                        "-s",
+                        action="store_true",
+                        help="boolean flag to save final model or not, defaults to false")
 
-   args = parser.parse_args()
+    parser.add_argument("--learning_rate",
+                        "-lr",
+                    default=1e-5,
+                    required=False)
+
+    parser.add_argument("--subset",
+                        "-ss",
+                        action="store_true",
+                        help="boolean flag to subset input data for looping different models or not, defaults to false")
+
+    parser.add_argument("--batch_size",
+                        "-bs",
+                        type=int,
+                        default=64,
+                        required=False)
+
+    args = parser.parse_args()
 
     model_trainer(
         data_input_path=args.data_input_path,
         output_dir=args.output_path,
         model_name=args.model_name,
-        save_model=args.save_model
+        save_model=args.save_model,
+        batch_size=args.batch_size,
+        learning_rate=args.learning_rate,
+        subset=args.subset
     )
 
 
-def model_trainer(data_input_path, output_dir, model_name, save_model=False, subset = None, report_path = None, learning_rate = 1e-5, batch_size = 64):
+def model_trainer(data_input_path, output_dir, model_name, save_model=False, subset = None, report_path = None, learning_rate = learning_rate, batch_size = batch_size):
 
     # -----------------------------------------------------------------------------------------
 
@@ -80,7 +99,7 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
     print("tokenizing dataset...")
     tokenized_eval, tokenized_train, class_weights = load_data(model, input_path=data_input_path, subset=subset)
 
-    print("initializing trainger")
+    print("initializing trainer")
     trainer = WeightedLossTrainer(  # Custom trainer function taking class balance into account
         model=model.lora_model,  # LoRA parameters
         args=model.training_setup(
@@ -170,7 +189,7 @@ class ModelInstantiation():
         return encoded
 
     def training_setup(self, output_path_checkpoints=None): 
-                     # names the run after your mode
+      # names the run after model name from argparse
       self.training_args = TrainingArguments(
          report_to="wandb",
          output_dir=output_path_checkpoints,
