@@ -14,7 +14,8 @@ from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, TrainingArguments, Trainer
 from datasets import Dataset
 from keras.losses import binary_crossentropy
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, classification_report
+import tensorflow as tf
 
 # %%
 
@@ -116,8 +117,6 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
     print("training done")
 
     if report_path is not None:
-        from sklearn.metrics import classification_report
-        import tensorflow as tf
         
         # Force Keras/TF to CPU to avoid CUDA handle conflict with PyTorch
         with tf.device('/CPU:0'):

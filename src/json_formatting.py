@@ -1,6 +1,6 @@
 # import modules
 import json
-from sklearn.metrics import accuracy_score, f1_score, average_precision_score, recall_score, confusion_matrix
+from sklearn.metrics import accuracy_score, f1_score, average_precision_score, recall_score, classification_report
 
 class Formatter(object):
 
@@ -232,7 +232,7 @@ class Formatter(object):
             y_ann.append(evaluation)
             y_model.append(label)
         
-        cm = confusion_matrix(y_ann, y_model)
+        cm = classification_report(y_ann, y_model)
 
         stats = {
             'recall': float(recall_score(y_ann, y_model)),
@@ -290,7 +290,7 @@ class Formatter(object):
 
         print("=" * 50)
 
-        print(f"\nConfusion matrix for alignment between aggreed upon annotated labels (y_true)\nand label deceided by DEBATE model + heuristics + level of agreeement:\n{con_mat} \n")
+        print(f"\nClassification report for alignment between aggreed upon annotated labels (y_true)\nand label deceided by DEBATE model + heuristics + level of agreeement:\n{con_mat} \n")
         print(f"\nAllignment statsbetween annotater agreement and prelim blame localization:\n{allign_stats}")
 
         print("=" * 50)
