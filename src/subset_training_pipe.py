@@ -2,7 +2,7 @@
 import os
 from pathlib import Path
 
-from training_pipe import model_trainer
+from training_pipeline_with_viz import model_trainer #OBS change if not working back to training_pipe
 from blame_detection import BlameDetector
 import torch
 

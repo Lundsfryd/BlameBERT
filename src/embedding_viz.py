@@ -70,7 +70,7 @@ import numpy as np
 import torch
 import wandb
 from datasets import Dataset
-from transformers import PreTrainedModel, PreTrainedTokenizerBase
+from transformers import PreTrainedModel
 from transformers.trainer_callback import (
     TrainerCallback,
     TrainerControl,
@@ -121,72 +121,41 @@ def _reduce_2d(
 @torch.no_grad()
 def extract_layer_cls_embeddings(
     model: PreTrainedModel,
-    tokenizer: PreTrainedTokenizerBase,
     probe_dataset: Dataset,
     device: torch.device,
     batch_size: int = 32,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Extract the [CLS] token hidden state from every encoder layer.
-
-    Returns
-    -------
-    all_hidden : np.ndarray  shape (n_layers, N, hidden_size)
-        Layer 0  → token embedding layer output
-        Layers 1–12 → transformer block outputs
-    labels     : np.ndarray  shape (N,)  — binary class labels
-    """
     model.eval()
-
-    texts = probe_dataset["text"]
-    labels = np.array(probe_dataset["labels"], dtype=int)
-
-    # PEFT wraps the base transformer; .base_model exposes it.
-    # We call the base model directly so output_hidden_states works as expected.
     base = model.base_model if hasattr(model, "base_model") else model
 
-    # Number of layers = num_hidden_layers (transformer blocks) + 1 (embedding)
+    labels = np.array(probe_dataset["labels"], dtype=int)
+    n = len(labels)
     n_layers: int = base.config.num_hidden_layers + 1
-
-    # Accumulate per-layer [CLS] vectors across batches
     accumulated: list[list[np.ndarray]] = [[] for _ in range(n_layers)]
 
-    for start in range(0, len(texts), batch_size):
-        batch_texts = texts[start : start + batch_size]
-        enc = tokenizer(
-            batch_texts,
-            padding=True,
-            truncation=True,
-            max_length=512,
-            return_tensors="pt",
-        ).to(device)
+    for start in range(0, n, batch_size):
+        input_ids = probe_dataset["input_ids"][start : start + batch_size].to(device)
+        attention_mask = probe_dataset["attention_mask"][start : start + batch_size].to(device)
 
         outputs = base(
-            **enc,
+            input_ids=input_ids,
+            attention_mask=attention_mask,
             output_hidden_states=True,
             return_dict=True,
         )
 
-        # hidden_states: tuple of tensors, each (B, seq_len, H)
-        # length == num_hidden_layers + 1
         for layer_idx, layer_hs in enumerate(outputs.hidden_states):
-            cls_vec = layer_hs[:, 0, :].cpu().float().numpy()  # (B, H)
+            cls_vec = layer_hs[:, 0, :].cpu().float().numpy()
             accumulated[layer_idx].append(cls_vec)
 
-    # Stack into (n_layers, N, H)
     all_hidden = np.stack(
-        [np.concatenate(batches, axis=0) for batches in accumulated],
-        axis=0,
+        [np.concatenate(batches, axis=0) for batches in accumulated], axis=0
     )
-
     return all_hidden, labels
-
-
 # ── wandb logging ─────────────────────────────────────────────────────────────
 
 def log_layer_embeddings(
     model: PreTrainedModel,
-    tokenizer: PreTrainedTokenizerBase,
     probe_dataset: Dataset,
     device: torch.device,
     epoch_label: str,
@@ -209,7 +178,7 @@ def log_layer_embeddings(
     print(f"\n[embedding_viz] Extracting hidden states — {epoch_label} …")
 
     all_hidden, labels = extract_layer_cls_embeddings(
-        model, tokenizer, probe_dataset, device, batch_size=batch_size
+        model, probe_dataset, device, batch_size=batch_size
     )
     n_layers = all_hidden.shape[0]
 
@@ -282,7 +251,6 @@ class LayerEmbeddingVizCallback(TrainerCallback):
     def __init__(
         self,
         model: PreTrainedModel,
-        tokenizer: PreTrainedTokenizerBase,
         probe_dataset: Dataset,
         device: torch.device,
         reduction: Literal["umap", "pca"] = "umap",
@@ -290,7 +258,6 @@ class LayerEmbeddingVizCallback(TrainerCallback):
         batch_size: int = 32,
     ) -> None:
         self.model = model
-        self.tokenizer = tokenizer
         self.probe_dataset = probe_dataset
         self.device = device
         self.reduction = reduction
@@ -307,7 +274,6 @@ class LayerEmbeddingVizCallback(TrainerCallback):
         epoch = int(round(state.epoch))
         log_layer_embeddings(
             model=self.model,
-            tokenizer=self.tokenizer,
             probe_dataset=self.probe_dataset,
             device=self.device,
             epoch_label=f"epoch_{epoch}",
