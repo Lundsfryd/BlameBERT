@@ -40,7 +40,9 @@ for ds in datasets[:1]:
         model_name = ds["model_name"], 
         save_model = False,
         subset = 10000,
-        report_path=report_path  # new argument
+        report_path=report_path,  # new argument
+        batch_size=64,
+        learning_rate=1e-5,
         )
 
     #run validation on best model

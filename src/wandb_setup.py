@@ -42,15 +42,17 @@ def setup_wandb_embedding_tracker_with_trajectories(model, tokenizer, probe_data
 
         with torch.no_grad():
             for i, batch in enumerate(dataloader):
-                batch = {k: v.to(device) for k, v in batch.items() if k in ["input_ids", "attention_mask", "labels"]}
+                # Extract sample_id BEFORE filtering the batch
+                sample_ids.extend(batch["sample_id"].cpu().numpy())
 
-                outputs = model(**batch, output_hidden_states=True)
+                # Only pass model-compatible keys to the model
+                model_inputs = {k: v.to(device) for k, v in batch.items() if k in ["input_ids", "attention_mask", "labels"]}
+
+                outputs = model(**model_inputs, output_hidden_states=True)
                 cls_emb = outputs.hidden_states[-1][:, 0, :]
 
                 embeddings.append(cls_emb.cpu())
-                labels.extend(batch["labels"].cpu().numpy())
-
-                sample_ids.extend(batch["sample_id"].cpu().numpy())
+                labels.extend(model_inputs["labels"].cpu().numpy())
 
         embeddings = torch.cat(embeddings).numpy()
         return embeddings, labels, sample_ids

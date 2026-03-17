@@ -16,6 +16,7 @@ from datasets import Dataset
 from keras.losses import binary_crossentropy
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, classification_report
 import tensorflow as tf
+import wandb
 from wandb_setup import create_balanced_probe, setup_wandb_embedding_tracker_with_trajectories, EmbeddingCallback, build_trajectory_table
 
 # %%
@@ -84,7 +85,7 @@ def main():
     )
 
 
-def model_trainer(data_input_path, output_dir, model_name, save_model=False, subset = None, report_path = None, learning_rate = learning_rate, batch_size = batch_size):
+def model_trainer(data_input_path, output_dir, model_name, save_model=False, subset = None, report_path = None, learning_rate = 1e-5, batch_size = 64):
 
     # -----------------------------------------------------------------------------------------
 
@@ -99,7 +100,7 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
     print("tokenizing dataset...")
     tokenized_eval, tokenized_train, class_weights = load_data(model, input_path=data_input_path, subset=subset)
     
-    print()
+    
     embedding_logger, history = wandb_params_setup(tokenized_eval, model)
 
     print("initializing trainer")
@@ -213,8 +214,8 @@ class ModelInstantiation():
          num_train_epochs=3,
          per_device_train_batch_size=self.batch_size,
          logging_steps=1,
-         eval_strategy="epochs",
-         save_strategy="epochs",
+         eval_strategy="epoch",
+         save_strategy="epoch",
          #eval_steps=500,
          #save_steps=500,
          dataloader_pin_memory=True,
@@ -244,9 +245,10 @@ class ModelInstantiation():
         weight_for_0 = total / (2 * label_counts[0]) if label_counts[0] > 0 else 1.0
         weight_for_1 = total / (2 * label_counts[1]) if label_counts[1] > 0 else 1.0
 
-        bin_crossentropy = binary_crossentropy(true, pred)
-        weights = true * weight_for_1 + (1.0 - true) * weight_for_0
-        weighted_bin_crossentropy = weights * bin_crossentropy
+        with tf.device('/CPU:0'):                          # <-- force CPU
+            bin_crossentropy = binary_crossentropy(true, pred)
+            weights = true * weight_for_1 + (1.0 - true) * weight_for_0
+            weighted_bin_crossentropy = weights * bin_crossentropy
 
         return float(np.mean(weighted_bin_crossentropy))
 
@@ -259,8 +261,9 @@ class ModelInstantiation():
         # distribution instead of passing train_data=None (which crashed previously)
         weighted_bce = self._weighted_bincrossentropy_from_labels(labels, probs)
 
-        keras_bce = binary_crossentropy(labels.astype(np.float32), probs.astype(np.float32))
-        keras_bce = float(np.mean(keras_bce.numpy()))
+        with tf.device('/CPU:0'):                          # <-- force CPU
+            keras_bce = binary_crossentropy(labels.astype(np.float32), probs.astype(np.float32))
+            keras_bce = float(np.mean(keras_bce.numpy()))
 
         return {
             'keras_BCE': keras_bce,
