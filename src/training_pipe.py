@@ -16,6 +16,7 @@ from datasets import Dataset
 from keras.losses import binary_crossentropy
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, classification_report
 import tensorflow as tf
+from wandb_setup import create_balanced_probe, setup_wandb_embedding_tracker_with_trajectories, EmbeddingCallback, build_trajectory_table
 
 # %%
 
@@ -88,9 +89,7 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
     # -----------------------------------------------------------------------------------------
 
     model = ModelInstantiation(learning_rate = learning_rate, batch_size = batch_size)
-
-    os.environ["WANDB_PROJECT"] = "mmbert-danish-politics"  # groups runs under a project
-    os.environ["WANDB_RUN_NAME"] = model_name  
+    wandb.init(project="mmbert-danish-politics", name=model_name)
 
     # FIX 1: Use the output_path directly — do not prepend ../../ which mangles user-provided paths
     output_model_dir = Path(output_dir)
@@ -99,6 +98,9 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
     # Load data function also returns class weights
     print("tokenizing dataset...")
     tokenized_eval, tokenized_train, class_weights = load_data(model, input_path=data_input_path, subset=subset)
+    
+    print()
+    embedding_logger, history = wandb_params_setup(tokenized_eval, model)
 
     print("initializing trainer")
     trainer = WeightedLossTrainer(  # Custom trainer function taking class balance into account
@@ -109,7 +111,8 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
         train_dataset=tokenized_train,
         eval_dataset=tokenized_eval,
         compute_metrics=model.compute_metrics,  # Custom metrics function
-        class_weights=class_weights  # Weighted by presence in dataset
+        class_weights=class_weights,  # Weighted by presence in dataset
+        callbacks=[EmbeddingCallback(embedding_logger)]
     )
 
     print("trainer.train")
@@ -145,8 +148,22 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
         if checkpoint_dir.exists():
             shutil.rmtree(checkpoint_dir)
 
+
+    build_trajectory_table(history)
+
     # FIX 2: Return the model so it can be used for inference immediately
     return trainer.model
+
+def wandb_params_setup(tokenized_eval, model):
+    probe_dataset = create_balanced_probe(tokenized_eval, n_samples=300)
+    
+    embedding_logger, history = setup_wandb_embedding_tracker_with_trajectories(
+                        model=model.lora_model,
+                        tokenizer=model.tokenizer,
+                        probe_dataset=probe_dataset,
+                        device=model.device)
+    
+    return embedding_logger, history
 
 
 # %%
@@ -257,7 +274,7 @@ class ModelInstantiation():
         }
 
 
-class WeightedLossTrainer(Trainer):
+class WeightedLossTrainer(Trainer): #OBS CLASS WEIGHTS ARE NONE?
     def __init__(self, *args, class_weights=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.class_weights = class_weights

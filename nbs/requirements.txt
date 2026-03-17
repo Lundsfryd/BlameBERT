@@ -18,3 +18,4 @@ tensorflow
 peft
 datasets
 wandb
+umap

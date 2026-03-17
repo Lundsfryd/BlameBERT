@@ -54,6 +54,3 @@ for ds in datasets[:1]:
     )
 
     detector.run_validation(validation_data_path, report_path)
-
-
-# %%
