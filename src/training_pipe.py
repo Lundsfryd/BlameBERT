@@ -101,7 +101,7 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
     tokenized_eval, tokenized_train, class_weights = load_data(model, input_path=data_input_path, subset=subset)
     
     
-    embedding_logger, history = wandb_params_setup(tokenized_eval, model)
+    embedding_logger, history, labels = wandb_params_setup(tokenized_eval, model)
 
     print("initializing trainer")
     trainer = WeightedLossTrainer(  # Custom trainer function taking class balance into account
@@ -149,8 +149,9 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
         if checkpoint_dir.exists():
             shutil.rmtree(checkpoint_dir)
 
-
-    build_trajectory_table(history)
+    
+    # AFTER
+    build_trajectory_table(history, project_name="mmbert-danish-politics", run_name=model_name)
 
     # FIX 2: Return the model so it can be used for inference immediately
     return trainer.model
@@ -163,8 +164,10 @@ def wandb_params_setup(tokenized_eval, model):
                         tokenizer=model.tokenizer,
                         probe_dataset=probe_dataset,
                         device=model.device)
+
+    labels = {row["sample_id"]: row["labels"] for row in probe_dataset}
     
-    return embedding_logger, history
+    return embedding_logger, history, labels
 
 
 # %%
