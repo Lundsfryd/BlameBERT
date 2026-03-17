@@ -78,6 +78,25 @@ from transformers.trainer_callback import (
     TrainingArguments,
 )
 
+# make probe dataset
+def create_balanced_probe(dataset, n_samples=300):
+    df = dataset.to_pandas()
+    n_per_class = n_samples // 2
+
+    df_0 = df[df["labels"] == 0].sample(n=min(n_per_class, len(df[df["labels"] == 0])), random_state=42)
+    df_1 = df[df["labels"] == 1].sample(n=min(n_per_class, len(df[df["labels"] == 1])), random_state=42)
+
+    balanced_df = pd.concat([df_0, df_1]).sample(frac=1, random_state=42)
+    # FIX 2: reset index before assigning sample_id to avoid leaking pandas index
+    balanced_df = balanced_df.reset_index(drop=True)
+    balanced_df["sample_id"] = range(len(balanced_df))
+
+    dataset = Dataset.from_pandas(balanced_df, preserve_index=False)  # add this flag
+    dataset.set_format(
+        type="torch",
+        columns=["input_ids", "attention_mask", "labels", "sample_id"]
+    )
+    return dataset
 
 # ── dimensionality reduction ──────────────────────────────────────────────────
 

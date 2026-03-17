@@ -17,8 +17,7 @@ from keras.losses import binary_crossentropy
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, classification_report
 import tensorflow as tf
 import wandb
-from wandb_setup import create_balanced_probe, setup_wandb_embedding_tracker_with_trajectories, EmbeddingCallback, build_trajectory_table
-from embedding_viz import LayerEmbeddingVizCallback, log_layer_embeddings   # <-- NEW
+from embedding_viz import LayerEmbeddingVizCallback, log_layer_embeddings, create_balanced_probe 
 
 # %%
 
@@ -102,8 +101,8 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
     tokenized_eval, tokenized_train, class_weights = load_data(model, input_path=data_input_path, subset=subset)  
     
     
-    #embedding_logger, history, labels = wandb_params_setup(tokenized_eval, model) #OBS
-    probe_dataset = create_balanced_probe(tokenized_eval, n_samples=300)   # <-- NEW (reuse if already built in wandb_params_setup)
+
+    probe_dataset = create_balanced_probe(tokenized_eval, n_samples=300)
 
     # ── Log the pre-training baseline BEFORE trainer.train() ─────────────────
     log_layer_embeddings(                                                   # <-- NEW
@@ -125,7 +124,6 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
         compute_metrics=model.compute_metrics,  # Custom metrics function
         class_weights=class_weights,  # Weighted by presence in dataset
         callbacks=[
-            #EmbeddingCallback(embedding_logger),      # existing — unchanged
             LayerEmbeddingVizCallback(                # <-- NEW
                 model         = model.lora_model,
                 probe_dataset = probe_dataset,
@@ -169,25 +167,9 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
         if checkpoint_dir.exists():
             shutil.rmtree(checkpoint_dir)
 
-    
-    # AFTER
-    #build_trajectory_table(history, project_name="mmbert-danish-politics", run_name=model_name)
 
     # FIX 2: Return the model so it can be used for inference immediately
     return trainer.model
-
-'''def wandb_params_setup(tokenized_eval, model):
-    probe_dataset = create_balanced_probe(tokenized_eval, n_samples=300)
-    
-    embedding_logger, history = setup_wandb_embedding_tracker_with_trajectories(
-                        model=model.lora_model,
-                        tokenizer=model.tokenizer,
-                        probe_dataset=probe_dataset,
-                        device=model.device)
-
-    labels = {row["sample_id"]: row["labels"] for row in probe_dataset}
-    
-    return embedding_logger, history, labels'''
 
 
 # %%
