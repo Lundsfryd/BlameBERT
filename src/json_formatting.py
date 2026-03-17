@@ -78,7 +78,8 @@ class Formatter(object):
             for line in f:
                 item = json.loads(line)
 
-                eval_str = item.get("evaluation", "").strip().lower()
+                eval_str = item.get("evaluation", "")
+                eval_str = str(eval_str).strip().lower()
 
                 if eval_str == "blame":
                     item["evaluation"] = 1
