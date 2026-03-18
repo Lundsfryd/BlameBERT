@@ -1,6 +1,6 @@
 # import modules
 import json
-from sklearn.metrics import accuracy_score, f1_score, average_precision_score, recall_score, classification_report
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, classification_report, cohen_kappa_score
 
 class Formatter(object):
 
@@ -78,15 +78,14 @@ class Formatter(object):
             for line in f:
                 item = json.loads(line)
 
-                eval_str = item.get("evaluation", "")
-                eval_str = str(eval_str).strip().lower()
+                eval_str = item.get("evaluation", "").strip().lower()
 
                 if eval_str == "blame":
                     item["evaluation"] = 1
                 elif eval_str in {"no blame", "no_blame", "noblame"}:
                     item["evaluation"] = 0
                 else:
-                    raise ValueError(f"Unknown evaluation label: {item.get('evaluation')}")
+                    raise ValueError(f"Unknown evaluation label: {item.get('evaluation')} and text: {item.get('text')}")
 
                 normalized.append(item)
 
@@ -121,22 +120,9 @@ class Formatter(object):
         a_labels = [a["evaluation"] for a, _ in pairs]
         b_labels = [b["evaluation"] for _, b in pairs]
 
-        n = len(a_labels)
+        ck = cohen_kappa_score(a_labels, b_labels)
 
-        po = sum(a == b for a, b in zip(a_labels, b_labels)) / n
-
-        p_a_1 = sum(a_labels) / n
-        p_a_0 = 1 - p_a_1
-
-        p_b_1 = sum(b_labels) / n
-        p_b_0 = 1 - p_b_1
-
-        pe = (p_a_1 * p_b_1) + (p_a_0 * p_b_0)
-
-        if pe == 1:
-            return 1.0
-
-        return (po - pe) / (1 - pe)
+        return ck
 
 
     def write_agreed_annotations(self, pairs, output_path):
@@ -237,7 +223,7 @@ class Formatter(object):
 
         stats = {
             'recall': float(recall_score(y_ann, y_model)),
-            'precision': float(average_precision_score(y_ann, y_model)),
+            'precision': float(precision_score(y_ann, y_model)),
             'accuracy': float(accuracy_score(y_ann, y_model)), # Need rounding for these two computations (integer required)
             'f1': float(f1_score(y_ann, y_model, average='macro'))} # macro f1 is better for imbalanced dataset
 
