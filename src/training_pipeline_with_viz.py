@@ -11,7 +11,7 @@ import argparse
 from pathlib import Path
 from collections import Counter
 from peft import LoraConfig, get_peft_model
-from transformers import AutoModelForSequenceClassification, AutoTokenizer, TrainingArguments, Trainer
+from transformers import AutoModelForSequenceClassification, AutoTokenizer, TrainingArguments, Trainer, DataCollatorWithPadding
 from datasets import Dataset
 from keras.losses import binary_crossentropy
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, classification_report
@@ -124,6 +124,7 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
         eval_dataset=tokenized_eval,
         compute_metrics=model.compute_metrics,  # Custom metrics function
         class_weights=class_weights,  # Weighted by presence in dataset
+        data_collator=model.data_collator,
         callbacks=[
             LayerEmbeddingVizCallback(                
                 model         = model.lora_model,
@@ -183,6 +184,7 @@ class ModelInstantiation():
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.learning_rate = learning_rate
         self.batch_size = batch_size
+        self.data_collator = DataCollatorWithPadding(tokenizer=self.tokenizer)
         print(f'\n\n#### Running training on {self.device} ####\n\n')
 
         base_model = AutoModelForSequenceClassification.from_pretrained(
@@ -205,7 +207,7 @@ class ModelInstantiation():
     def tokenize_function(self, examples):
         encoded = self.tokenizer(
             examples["text"],
-            padding="max_length",
+            #padding="max_length", # Removing for smart batching
             truncation=True,
             max_length=512,
         )
