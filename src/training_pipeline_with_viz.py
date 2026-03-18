@@ -65,7 +65,8 @@ def main():
                         "-ss",
                         type=int,
                         default=None,
-                        help="Takes an integer which determines the absolute size of the subset dataset. Defaults to None, which means training happens on full dataset.")
+                        help="Takes an integer which determines the absolute size of the subset dataset. Defaults to None, which means training happens on full dataset.",
+                        required=False)
 
     parser.add_argument("--batch_size",
                         "-bs",
@@ -101,12 +102,11 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
     print("tokenizing dataset...")
     tokenized_eval, tokenized_train, class_weights = load_data(model, input_path=data_input_path, subset=subset)  
     
-    
 
     probe_dataset = create_balanced_probe(tokenized_eval, n_samples=300)
 
     # ── Log the pre-training baseline BEFORE trainer.train() ─────────────────
-    log_layer_embeddings(                                                   # <-- NEW
+    log_layer_embeddings(                                                   
         model         = model.lora_model,
         probe_dataset = probe_dataset,
         device        = model.device,
@@ -125,7 +125,7 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
         compute_metrics=model.compute_metrics,  # Custom metrics function
         class_weights=class_weights,  # Weighted by presence in dataset
         callbacks=[
-            LayerEmbeddingVizCallback(                # <-- NEW
+            LayerEmbeddingVizCallback(                
                 model         = model.lora_model,
                 probe_dataset = probe_dataset,
                 device        = model.device,
@@ -169,7 +169,6 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
             shutil.rmtree(checkpoint_dir)
 
 
-    # FIX 2: Return the model so it can be used for inference immediately
     return trainer.model
 
 
@@ -196,8 +195,6 @@ class ModelInstantiation():
             target_modules="all-linear"
         )
 
-        # FIX 3: prepare_model_for_kbit_training is for quantized (4/8-bit) models only.
-        # For full-precision LoRA, apply the config directly and set gradients manually.
         self.lora_model = get_peft_model(base_model, lora_config)
         self.lora_model.print_trainable_parameters()
         return
@@ -230,8 +227,7 @@ class ModelInstantiation():
          max_grad_norm=1.0,
          disable_tqdm=False,
          load_best_model_at_end=True,
-         # FIX 4: Newer transformers versions expect the "eval_" prefix on the metric name
-         metric_for_best_model="eval_weighted_BCE",
+         metric_for_best_model="weighted_BCE",
          greater_is_better=False,
       )
       return self.training_args
@@ -251,7 +247,7 @@ class ModelInstantiation():
         weight_for_0 = total / (2 * label_counts[0]) if label_counts[0] > 0 else 1.0
         weight_for_1 = total / (2 * label_counts[1]) if label_counts[1] > 0 else 1.0
 
-        with tf.device('/CPU:0'):                          # <-- force CPU
+        with tf.device('/CPU:0'):                          
             bin_crossentropy = binary_crossentropy(true, pred)
             weights = true * weight_for_1 + (1.0 - true) * weight_for_0
             weighted_bin_crossentropy = weights * bin_crossentropy
@@ -267,7 +263,7 @@ class ModelInstantiation():
         # distribution instead of passing train_data=None (which crashed previously)
         weighted_bce = self._weighted_bincrossentropy_from_labels(labels, probs)
 
-        with tf.device('/CPU:0'):                          # <-- force CPU
+        with tf.device('/CPU:0'):                          
             keras_bce = binary_crossentropy(labels.astype(np.float32), probs.astype(np.float32))
             keras_bce = float(np.mean(keras_bce.numpy()))
 
