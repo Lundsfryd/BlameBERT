@@ -7,8 +7,6 @@ import gc
 
 # ------------------------------------------------------------------- # 
 
-#base_dir = Path("/work/MarkusLundsfrydJensen#1865/data_outside_git")
-
 # %%
 parent_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(parent_dir)
@@ -18,15 +16,14 @@ data_dir = os.path.join(root_dir, "data","training_data", "diff_hypothesis_agree
 validation_data_path = os.path.join(os.path.dirname(data_dir),
                             "validation_set",
                             "validation_set.jsonl")
-print(os.path.abspath(validation_data_path))
 # %%
 
 output_dir = os.path.join(root_dir,
                         "training_output")
 
 datasets = [
-    #{"path": Path(os.path.join(data_dir, "1_5_agreement.jsonl" )), "model_name": "data_1_5"},
-    #{"path": Path(os.path.join(data_dir, "2_5_agreement.jsonl" )), "model_name": "data_2_5"},
+    {"path": Path(os.path.join(data_dir, "1_5_agreement.jsonl" )), "model_name": "data_1_5"},
+    {"path": Path(os.path.join(data_dir, "2_5_agreement.jsonl" )), "model_name": "data_2_5"},
     {"path": Path(os.path.join(data_dir, "3_5_agreement.jsonl" )), "model_name": "data_3_5"},
     {"path": Path(os.path.join(data_dir, "4_5_agreement.jsonl" )), "model_name": "data_4_5"},
     {"path": Path(os.path.join(data_dir, "5_agreement.jsonl" )), "model_name": "data_5"},

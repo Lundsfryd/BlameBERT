@@ -161,6 +161,7 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
         print(f"\n\n#### Saving full model to {save_dir} ####\n\n")
         os.makedirs(save_dir, exist_ok=True)
         trainer.model.save_pretrained(str(save_dir))
+        model.tokenizer.save_pretrained(str(save_dir))
     else:
         # Remove checkpoints directory if we don't want anything saved
         import shutil
