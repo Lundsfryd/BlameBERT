@@ -17,18 +17,18 @@ data_dir = os.path.join(root_dir, "data","training_data")
 validation_data_path = os.path.join(data_dir,
                             "validation_set.jsonl")
 
-train_data_dir = os.path.join(data_dir,
-                            "diff_hypothesis_agreemen")
+#train_data_dir = os.path.join(data_dir,
+#                            "diff_hypothesis_agreemen")
 
 output_dir = os.path.join(root_dir,
                         "training_output")
 
 datasets = [
-    {"path": Path(os.path.join(train_data_dir, "1_5_agreement.jsonl" )), "model_name": "data_1_5"},
-    {"path": Path(os.path.join(train_data_dir, "2_5_agreement.jsonl" )), "model_name": "data_2_5"},
+    {"path": Path(os.path.join(train_data_dir, "3_5_agreement.jsonl" )), "model_name": "data_1_5"},
+    {"path": Path(os.path.join(train_data_dir, "3_5_agreement.jsonl" )), "model_name": "data_2_5"},
     {"path": Path(os.path.join(train_data_dir, "3_5_agreement.jsonl" )), "model_name": "data_3_5"},
-    {"path": Path(os.path.join(train_data_dir, "4_5_agreement.jsonl" )), "model_name": "data_4_5"},
-    {"path": Path(os.path.join(train_data_dir, "5_agreement.jsonl" )), "model_name": "data_5"},
+    {"path": Path(os.path.join(train_data_dir, "3_5_agreement.jsonl" )), "model_name": "data_4_5"},
+    {"path": Path(os.path.join(train_data_dir, "3_5_agreement.jsonl" )), "model_name": "data_5"},
 ]
 
 ######## RUN TRAINING LOOOP HERE ###########
@@ -42,7 +42,7 @@ for ds in datasets[:1]:
         output_dir = output_dir,
         model_name = ds["model_name"], 
         save_model = False,
-        subset = 10000,
+        subset = 10,
         report_path=report_path,  # new argument
         batch_size=64,
         learning_rate=1e-5,
