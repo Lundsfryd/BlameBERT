@@ -6,17 +6,21 @@ from blame_detection import BlameDetector
 
 # ------------------------------------------------------------------- # 
 
-base_dir = Path("/work/MarkusLundsfrydJensen#1865/data_outside_git")
+#base_dir = Path("/work/MarkusLundsfrydJensen#1865/data_outside_git")
 
-validation_data_path = os.path.join(base_dir,
-                            "training_data",
+# %%
+parent_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(parent_dir)
+data_dir = os.path.join(root_dir, "data","training_data")
+
+# %%
+validation_data_path = os.path.join(data_dir,
                             "validation_set.jsonl")
 
-train_data_dir = os.path.join(base_dir,
-                                "training_data",
-                                "diff_hypothesis_agreemen")
+train_data_dir = os.path.join(data_dir,
+                            "diff_hypothesis_agreemen")
 
-output_dir = os.path.join(base_dir,
+output_dir = os.path.join(root_dir,
                         "training_output")
 
 datasets = [
