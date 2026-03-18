@@ -1,11 +1,10 @@
-# %%
 import os
-from pathlib import Path
-
-from training_pipeline_with_viz import model_trainer #OBS change if not working back to training_pipe
-from blame_detection import BlameDetector
 import torch
+from pathlib import Path
+from training_pipeline_with_viz import model_trainer
+from blame_detection import BlameDetector
 
+# ------------------------------------------------------------------- # 
 
 base_dir = Path("/work/MarkusLundsfrydJensen#1865/data_outside_git")
 
@@ -20,7 +19,7 @@ train_data_dir = os.path.join(base_dir,
 output_dir = os.path.join(base_dir,
                         "training_output")
 
-datasets = [ # Obviously five different datasets in future, doing this to test the loop
+datasets = [
     {"path": Path(os.path.join(train_data_dir, "1_5_agreement.jsonl" )), "model_name": "data_1_5"},
     {"path": Path(os.path.join(train_data_dir, "2_5_agreement.jsonl" )), "model_name": "data_2_5"},
     {"path": Path(os.path.join(train_data_dir, "3_5_agreement.jsonl" )), "model_name": "data_3_5"},
@@ -56,3 +55,8 @@ for ds in datasets[:1]:
     )
 
     detector.run_validation(validation_data_path, report_path)
+
+    del model
+    del detector
+    torch.cuda.empty_cache()
+    gc.collect()
