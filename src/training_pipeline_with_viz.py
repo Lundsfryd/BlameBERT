@@ -167,6 +167,8 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
         checkpoint_dir = output_model_dir / "checkpoints" / model_name
         if checkpoint_dir.exists():
             shutil.rmtree(checkpoint_dir)
+    
+    wandb.finish(exit_code = 0)
 
 
     return trainer.model

@@ -61,7 +61,6 @@ for ds in datasets[:]:
 
     detector.run_validation(validation_data_path, report_path)
 
-
     del model
     del detector
     torch.cuda.empty_cache()
