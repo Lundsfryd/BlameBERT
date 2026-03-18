@@ -24,11 +24,11 @@ output_dir = os.path.join(root_dir,
                         "training_output")
 
 datasets = [
-    {"path": Path(os.path.join(train_data_dir, "3_5_agreement.jsonl" )), "model_name": "data_1_5"},
-    {"path": Path(os.path.join(train_data_dir, "3_5_agreement.jsonl" )), "model_name": "data_2_5"},
-    {"path": Path(os.path.join(train_data_dir, "3_5_agreement.jsonl" )), "model_name": "data_3_5"},
-    {"path": Path(os.path.join(train_data_dir, "3_5_agreement.jsonl" )), "model_name": "data_4_5"},
-    {"path": Path(os.path.join(train_data_dir, "3_5_agreement.jsonl" )), "model_name": "data_5"},
+    {"path": Path(os.path.join(data_dir, "3_5_agreement.jsonl" )), "model_name": "data_1_5"},
+    {"path": Path(os.path.join(data_dir, "3_5_agreement.jsonl" )), "model_name": "data_2_5"},
+    {"path": Path(os.path.join(data_dir, "3_5_agreement.jsonl" )), "model_name": "data_3_5"},
+    {"path": Path(os.path.join(data_dir, "3_5_agreement.jsonl" )), "model_name": "data_4_5"},
+    {"path": Path(os.path.join(data_dir, "3_5_agreement.jsonl" )), "model_name": "data_5"},
 ]
 
 ######## RUN TRAINING LOOOP HERE ###########
