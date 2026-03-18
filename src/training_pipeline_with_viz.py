@@ -218,13 +218,16 @@ class ModelInstantiation():
          gradient_checkpointing=True,
          output_dir=output_path_checkpoints,
          learning_rate=self.learning_rate,
-         num_train_epochs=3,
+         num_train_epochs=5,
          per_device_train_batch_size=self.batch_size,
-         logging_steps=1,
-         eval_strategy="epoch",
-         save_strategy="epoch",
-         #eval_steps=500,
-         #save_steps=500,
+         logging_steps=50,
+         #eval_strategy="epoch",
+         #save_strategy="epoch",
+         eval_strategy="steps",
+         save_strategy="steps",
+         eval_steps=200,
+         save_steps=200,
+         save_total_limit=3,
          dataloader_pin_memory=False,
          dataloader_num_workers=8,
          remove_unused_columns=True,
@@ -353,6 +356,55 @@ def load_data(model_instance, input_path, subset = None):
 
     return tokenized_eval, tokenized_train, torch.tensor([weight_for_0, weight_for_1], dtype=torch.float32)
 
+
+def read_best_weighted_bce(run_output_dir: Path, model_name: str) -> float:
+    """
+    Parse the best eval weighted_BCE from the HuggingFace trainer_state.json
+    that is written inside the best checkpoint folder.
+ 
+    Falls back to a large sentinel value (1e9) if the file cannot be found,
+    so the sweep still completes and the run is ranked last.
+    """
+    checkpoint_root = run_output_dir / "checkpoints" / model_name
+ 
+    if not checkpoint_root.exists():
+        print(f"  [WARNING] checkpoint dir not found: {checkpoint_root}")
+        return float("1e9")
+ 
+    # trainer_state.json is in every checkpoint sub-folder; pick the last one.
+    state_files = sorted(checkpoint_root.glob("checkpoint-*/trainer_state.json"))
+    if not state_files:
+        # HF also writes a trainer_state.json directly in the output_dir
+        direct = checkpoint_root / "trainer_state.json"
+        if direct.exists():
+            state_files = [direct]
+ 
+    if not state_files:
+        print(f"  [WARNING] no trainer_state.json found under {checkpoint_root}")
+        return float("1e9")
+ 
+    # Use the last checkpoint's state (most recent epoch)
+    with open(state_files[-1]) as f:
+        state = json.load(f)
+ 
+    # Extract the best_metric value recorded by the Trainer
+    # (metric_for_best_model = "weighted_BCE", greater_is_better = False)
+    best_metric = state.get("best_metric")
+    if best_metric is not None:
+        return float(best_metric)
+ 
+    # Fallback: scan the log history for the minimum eval/weighted_BCE
+    log_history = state.get("log_history", [])
+    bce_values = [
+        entry["eval_weighted_BCE"]
+        for entry in log_history
+        if "eval_weighted_BCE" in entry
+    ]
+    if bce_values:
+        return min(bce_values)
+ 
+    print(f"  [WARNING] weighted_BCE not found in trainer_state for {model_name}")
+    return float("1e9")
 
 # %%
 if __name__ == "__main__":

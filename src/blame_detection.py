@@ -244,12 +244,14 @@ class BlameDetector(object):
         
         print(report)
 
+        
+
         if report_output_path is not None:
             with open(report_output_path, "a") as f:  # "a" to append, not overwrite
                 f.write("\n=== Validation Set Report ===\n\n")
                 f.write(report)
             print(f"Validation report appended to {report_output_path}")
 
-            evaluation = (predictions, true_labels)
+        evaluation = (predictions, true_labels)
 
         return self.compute_metrics(evaluation)
