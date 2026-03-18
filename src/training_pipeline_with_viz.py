@@ -63,8 +63,9 @@ def main():
 
     parser.add_argument("--subset",
                         "-ss",
-                        action="store_true",
-                        help="boolean flag to subset input data for looping different models or not, defaults to false")
+                        type=int,
+                        default=None,
+                        help="Takes an integer which determines the absolute size of the subset dataset. Defaults to None, which means training happens on full dataset.")
 
     parser.add_argument("--batch_size",
                         "-bs",
