@@ -77,6 +77,7 @@ from transformers.trainer_callback import (
     TrainerState,
     TrainingArguments,
 )
+import pandas as pd
 
 # make probe dataset
 def create_balanced_probe(dataset, n_samples=300):
