@@ -309,42 +309,46 @@ def read_jsonl(file_path):
     return records
 
 
-def load_data(model_instance, input_path, subset=None):
+def load_data(model_instance, input_path, subset = None):
+    # Loading data, renaming columns to what trainer expects, and converting to Dataset
     data_records = read_jsonl(input_path)
     data = pd.DataFrame(data_records)
     data = data[["text", "label"]]
     data.rename(columns={'label': 'labels'}, inplace=True)
 
     if subset is not None:
-        df_0 = data[data['labels'] == 0]
-        df_1 = data[data['labels'] == 1]
-
-        n_1 = min(len(df_1), subset // 2)
-        n_0 = min(len(df_0), subset - n_1)  # fill remainder with negatives
-
-        if n_1 < subset // 2:
-            print(f"WARNING: Minority class (label=1) only has {len(df_1)} samples. "
-                  f"Using {n_1} positives and {n_0} negatives to reach {n_0 + n_1} total.")
-
-        df_0 = df_0.sample(n=n_0, random_state=42)
-        df_1 = df_1.sample(n=n_1, random_state=42)
+        df_0 = data[data['labels'] == 0].sample(n=subset // 2, random_state=42)
+        df_1 = data[data['labels'] == 1].sample(n=subset // 2, random_state=42)
         data = pd.concat([df_0, df_1]).sample(frac=1, random_state=42).reset_index(drop=True)
 
-        dataset = Dataset.from_pandas(data)
+    dataset = Dataset.from_pandas(data)
 
-        dataset = dataset.train_test_split(test_size=0.1, seed=42)
-        eval_dataset = dataset["test"]
-        train_dataset = dataset["train"]
+    # 90/10 train/eval split
+    dataset = dataset.train_test_split(test_size=0.1, seed=42)
+    eval_dataset = dataset["test"]
+    train_dataset = dataset["train"]
 
-        tokenized_eval = eval_dataset.map(model_instance.tokenize_function, batched=True)
-        tokenized_train = train_dataset.map(model_instance.tokenize_function, batched=True)
+    # Tokenizing
+    tokenized_eval = eval_dataset.map(model_instance.tokenize_function, batched=True)
+    tokenized_train = train_dataset.map(model_instance.tokenize_function, batched=True)
 
-        label_counts = Counter(train_dataset['labels'])
-        total = len(train_dataset)
-        weight_for_0 = total / (2 * label_counts[0])
-        weight_for_1 = total / (2 * label_counts[1])
+    # Sorting eval for smart batching (tokenizer pads to max length, make batches as small as possible)
+    sorted_indices_eval = sorted(
+    range(len(tokenized_eval)), key=lambda i: len(tokenized_eval[i]["text"].split()), reverse=True)
+    tokenized_eval = tokenized_eval.select(sorted_indices_eval)
 
-        return tokenized_eval, tokenized_train, torch.tensor([weight_for_0, weight_for_1], dtype=torch.float32)
+    # Sorting train for smart batching
+    sorted_indices_train = sorted(
+    range(len(tokenized_train)), key=lambda i: len(tokenized_train[i]["text"].split()), reverse=True)
+    tokenized_train = tokenized_train.select(sorted_indices_train)
+
+    # Computing class weights from training split only
+    label_counts = Counter(train_dataset['labels'])
+    total = len(train_dataset)
+    weight_for_0 = total / (2 * label_counts[0])
+    weight_for_1 = total / (2 * label_counts[1])
+
+    return tokenized_eval, tokenized_train, torch.tensor([weight_for_0, weight_for_1], dtype=torch.float32)
 
 
 # %%
