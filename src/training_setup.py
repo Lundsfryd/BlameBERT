@@ -89,7 +89,11 @@ def main():
     )
 
 
-def model_trainer(data_input_path, output_dir, model_name, save_model=False, subset = None, report_path = None, learning_rate = 1e-5, batch_size = 64):
+def model_trainer(data_input_path, output_dir, model_name, save_model=False,
+                  subset=None, report_path=None, learning_rate=1e-5,
+                  batch_size=64,
+                  lr_scheduler="inverse_sqrt",   # NEW
+                  alpha_mode="sqrt"): #new
 
     # -----------------------------------------------------------------------------------------
 
@@ -102,7 +106,12 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
 
     # Load data function also returns class weights
     print("tokenizing dataset...")
-    tokenized_eval, tokenized_train, class_weights = load_data(model, input_path=data_input_path, subset=subset)  
+    tokenized_eval, tokenized_train, class_weights = load_data(
+        model,
+        input_path=data_input_path,
+        subset=subset,
+        alpha_mode=alpha_mode,        # NEW — forward to load_data
+    )
     
     print(class_weights)
     probe_dataset = create_balanced_probe(tokenized_eval, n_samples=300)
@@ -124,6 +133,7 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
         args=model.training_setup(
             output_path_checkpoints=str(output_model_dir / "checkpoints" / model_name)
         ),
+        lr_scheduler=lr_scheduler,
         train_dataset=tokenized_train,
         eval_dataset=tokenized_eval,
         compute_metrics=model.compute_metrics,  # Custom metrics function
@@ -214,7 +224,8 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
     wandb.finish(exit_code = 0)
 
 
-    return trainer.model
+    best_mcc = trainer.state.best_metric   # HF Trainer stores this automatically
+    return trainer.model, best_mcc
 
 
 # %%
@@ -253,7 +264,7 @@ class ModelInstantiation():
         )
         return encoded
 
-    def training_setup(self, output_path_checkpoints=None): 
+    def training_setup(self, output_path_checkpoints=None, lr_scheduler="inverse_sqrt"): 
       # names the run after model name from argparse
       self.training_args = TrainingArguments(
          report_to="wandb",
@@ -264,13 +275,13 @@ class ModelInstantiation():
          num_train_epochs=5,
          per_device_train_batch_size=self.batch_size,
          per_device_eval_batch_size=self.batch_size,
-         logging_steps=5,
-         #eval_strategy="epoch",
-         #save_strategy="epoch",
-         eval_strategy="steps",
-         save_strategy="steps",
-         eval_steps=500,
-         save_steps=500,
+         logging_steps=2,
+         eval_strategy="epoch",
+         save_strategy="epoch",
+         #eval_strategy="steps",
+         #save_strategy="steps",
+         #eval_steps=500,
+         #save_steps=500,
          #save_total_limit=3,
          dataloader_pin_memory=False,
          dataloader_num_workers=8,
@@ -280,6 +291,7 @@ class ModelInstantiation():
          load_best_model_at_end=True,
          metric_for_best_model="mcc",
          greater_is_better=True,
+         lr_scheduler_type=lr_scheduler,
       )
       return self.training_args
 
@@ -472,17 +484,28 @@ def load_data(model_instance, input_path, subset = None):
 
     # Computing class weights from training split only
     label_counts = Counter(train_dataset['labels'])
-    total = sum(label_counts.values())  # total training examples
-    
-    # In load_data, replace the last few lines:
+    total = sum(label_counts.values())
+ 
     weight_for_0 = total / (2 * label_counts[0])
     weight_for_1 = total / (2 * label_counts[1])
-
     raw_weights = torch.tensor([weight_for_0, weight_for_1], dtype=torch.float32)
-    sqrt_weights = torch.sqrt(raw_weights)          # compress extremes
-    sqrt_weights = sqrt_weights / sqrt_weights.min() # normalise so smallest = 1.0
-
-    return tokenized_eval, tokenized_train, sqrt_weights
+ 
+    # Apply scaling based on alpha_mode
+    if alpha_mode == "sqrt":
+        scaled = torch.sqrt(raw_weights)
+    elif alpha_mode == "two_thirds":
+        scaled = raw_weights ** (2 / 3)
+    elif alpha_mode == "raw":
+        scaled = raw_weights
+    else:
+        raise ValueError(f"Unknown alpha_mode '{alpha_mode}'. "
+                         f"Choose from: 'sqrt', 'two_thirds', 'raw'")
+ 
+    scaled = scaled / scaled.min()   # normalise so smallest weight = 1.0
+ 
+    print(f"  alpha_mode={alpha_mode} → weights: {scaled.tolist()}")
+ 
+    return tokenized_eval, tokenized_train, scaled
 
 
 def read_best_weighted_bce(run_output_dir: Path, model_name: str) -> float:
