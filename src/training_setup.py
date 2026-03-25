@@ -113,17 +113,17 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False,
         alpha_mode=alpha_mode,        # NEW — forward to load_data
     )
     
-    print(class_weights)
-    probe_dataset = create_balanced_probe(tokenized_eval, n_samples=300)
+    print(f"\napplied class weights: {class_weights}\n")
+    #probe_dataset = create_balanced_probe(tokenized_eval, n_samples=300)
 
     # ── Log the pre-training baseline BEFORE trainer.train() ─────────────────
-    log_layer_embeddings(                                                   
-        model         = model.lora_model,
-        probe_dataset = probe_dataset,
-        device        = model.device,
-        epoch_label   = "pre-training",
-        layers_to_log = [0, 4, 8, 11],  # embed layer + 3 encoder checkpoints
-    )
+    #log_layer_embeddings(                                                   
+    #    model         = model.lora_model,
+    #    probe_dataset = probe_dataset,
+    #    device        = model.device,
+    #    epoch_label   = "pre-training",
+    #    layers_to_log = [0, 4, 8, 11],  # embed layer + 3 encoder checkpoints
+    #)
 
     print("initializing trainer")
     trainer = FocalLossTrainer(
@@ -139,13 +139,13 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False,
         compute_metrics=model.compute_metrics,  # Custom metrics function
         data_collator=model.data_collator,
         callbacks=[
-            LayerEmbeddingVizCallback(                
-                model         = model.lora_model,
-                probe_dataset = probe_dataset,
-                device        = model.device,
-                layers_to_log = [0, 4, 8, 11],       # same layers as baseline
-                reduction     = "umap",               # or "pca" for speed
-            ),
+            #LayerEmbeddingVizCallback(                
+            #    model         = model.lora_model,
+            #    probe_dataset = probe_dataset,
+            #    device        = model.device,
+            #    layers_to_log = [0, 4, 8, 11],       # same layers as baseline
+            #    reduction     = "umap",               # or "pca" for speed
+            #),
             EarlyStoppingCallback(
             early_stopping_patience=3,   # stop after 5 evals with no improvement
             ),
