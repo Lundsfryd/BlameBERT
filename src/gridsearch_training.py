@@ -29,7 +29,7 @@ datasets = [
 
 # ── Hyperparameter grid ──────────────────────────────────────────────
 LEARNING_RATES   = [1e-6, 1e-5, 1e-4]
-LR_SCHEDULERS    = ["linear", "inverse_sqrt"]
+LR_SCHEDULERS    = ["linear"]
 ALPHA_MODES      = ["sqrt", "two_thirds", "raw"]   # applied inside model_trainer via load_data
 # --------------------------------------------------------------------
 # NOTE: alpha_mode is passed to model_trainer and forwarded to load_data,

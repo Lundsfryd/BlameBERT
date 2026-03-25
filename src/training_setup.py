@@ -126,14 +126,16 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False,
     #)
 
     print("initializing trainer")
+    training_args = model.training_setup(
+    output_path_checkpoints=str(output_model_dir / "checkpoints" / model_name),
+    lr_scheduler=lr_scheduler,
+    )
+
     trainer = FocalLossTrainer(
         alpha=class_weights,  # easy to change from the outside
         gamma=2.0,
         model=model.lora_model,  # LoRA parameters
-        args=model.training_setup(
-            output_path_checkpoints=str(output_model_dir / "checkpoints" / model_name)
-        ),
-        lr_scheduler=lr_scheduler,
+        args=training_args,
         train_dataset=tokenized_train,
         eval_dataset=tokenized_eval,
         compute_metrics=model.compute_metrics,  # Custom metrics function
@@ -176,19 +178,8 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False,
         ],
     )'''
 
-    def wandb_hp_space(trial):
-        return {
-            "method": "random",
-            "metric": {"name": "objective", "goal": "minimize"},
-            "parameters": {
-                "learning_rate": {"distribution": "uniform", "min": 1e-6, "max": 1e-4},
-                "alpha": {"values": [16, 32, 64, 128]},
-            },
-        }
-
     print("trainer.train")
     trainer.train()
-    #trainer.hyperparametersearch
     print("training done")
 
     if report_path is not None:
@@ -271,7 +262,6 @@ class ModelInstantiation():
          gradient_checkpointing=True,
          output_dir=output_path_checkpoints,
          learning_rate=self.learning_rate,
-         lr_scheduler_type="inverse_sqrt",
          num_train_epochs=5,
          per_device_train_batch_size=self.batch_size,
          per_device_eval_batch_size=self.batch_size,
@@ -439,7 +429,7 @@ def read_jsonl(file_path):
     return records
 
 
-def load_data(model_instance, input_path, subset = None):
+def load_data(model_instance, input_path, subset=None, alpha_mode="sqrt"):
     # Loading data, renaming columns to what trainer expects, and converting to Dataset
     data_records = read_jsonl(input_path)
     data = pd.DataFrame(data_records)
