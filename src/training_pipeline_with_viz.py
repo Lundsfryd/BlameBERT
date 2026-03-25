@@ -1,6 +1,7 @@
 # %%
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import transformers
 import numpy as np
 import pandas as pd
@@ -11,13 +12,14 @@ import argparse
 from pathlib import Path
 from collections import Counter
 from peft import LoraConfig, get_peft_model
-from transformers import AutoModelForSequenceClassification, AutoTokenizer, TrainingArguments, Trainer, DataCollatorWithPadding
+from transformers import AutoModelForSequenceClassification, AutoTokenizer, TrainingArguments, Trainer, DataCollatorWithPadding, EarlyStoppingCallback
 from datasets import Dataset
 from keras.losses import binary_crossentropy
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, classification_report
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, classification_report, precision_recall_curve, matthews_corrcoef # MCC is in essence a correlation coefficient value between -1 and +1. A coefficient of +1 represents a perfect prediction, 0 an average random prediction and -1 an inverse prediction
 import tensorflow as tf
 import wandb
 from embedding_viz import LayerEmbeddingVizCallback, log_layer_embeddings, create_balanced_probe 
+
 
 # %%
 
@@ -102,7 +104,7 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
     print("tokenizing dataset...")
     tokenized_eval, tokenized_train, class_weights = load_data(model, input_path=data_input_path, subset=subset)  
     
-
+    print(class_weights)
     probe_dataset = create_balanced_probe(tokenized_eval, n_samples=300)
 
     # ── Log the pre-training baseline BEFORE trainer.train() ─────────────────
@@ -115,7 +117,32 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
     )
 
     print("initializing trainer")
-    trainer = WeightedLossTrainer(  # Custom trainer function taking class balance into account
+    trainer = FocalLossTrainer(
+        alpha=class_weights,  # easy to change from the outside
+        gamma=2.0,
+        model=model.lora_model,  # LoRA parameters
+        args=model.training_setup(
+            output_path_checkpoints=str(output_model_dir / "checkpoints" / model_name)
+        ),
+        train_dataset=tokenized_train,
+        eval_dataset=tokenized_eval,
+        compute_metrics=model.compute_metrics,  # Custom metrics function
+        data_collator=model.data_collator,
+        callbacks=[
+            LayerEmbeddingVizCallback(                
+                model         = model.lora_model,
+                probe_dataset = probe_dataset,
+                device        = model.device,
+                layers_to_log = [0, 4, 8, 11],       # same layers as baseline
+                reduction     = "umap",               # or "pca" for speed
+            ),
+            EarlyStoppingCallback(
+            early_stopping_patience=3,   # stop after 5 evals with no improvement
+            ),
+        ],
+        )
+        
+    '''trainer = WeightedLossTrainer(  # Custom trainer function taking class balance into account
         model=model.lora_model,  # LoRA parameters
         args=model.training_setup(
             output_path_checkpoints=str(output_model_dir / "checkpoints" / model_name)
@@ -126,15 +153,18 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False, sub
         class_weights=class_weights,  # Weighted by presence in dataset
         data_collator=model.data_collator,
         callbacks=[
-            LayerEmbeddingVizCallback(                
-                model         = model.lora_model,
-                probe_dataset = probe_dataset,
-                device        = model.device,
-                layers_to_log = [0, 4, 8, 11],       # same layers as baseline
-                reduction     = "umap",               # or "pca" for speed
+            #LayerEmbeddingVizCallback(                
+            #    model         = model.lora_model,
+            #    probe_dataset = probe_dataset,
+            #    device        = model.device,
+            #    layers_to_log = [0, 4, 8, 11],       # same layers as baseline
+            #    reduction     = "umap",               # or "pca" for speed
+            #),
+            EarlyStoppingCallback(
+            early_stopping_patience=3,   # stop after 5 evals with no improvement
             ),
         ],
-    )
+    )'''
 
     print("trainer.train")
     trainer.train()
@@ -222,22 +252,23 @@ class ModelInstantiation():
          learning_rate=self.learning_rate,
          num_train_epochs=5,
          per_device_train_batch_size=self.batch_size,
-         logging_steps=50,
+         per_device_eval_batch_size=self.batch_size,
+         logging_steps=5,
          #eval_strategy="epoch",
          #save_strategy="epoch",
          eval_strategy="steps",
          save_strategy="steps",
-         eval_steps=200,
-         save_steps=200,
-         save_total_limit=3,
+         eval_steps=500,
+         save_steps=500,
+         #save_total_limit=3,
          dataloader_pin_memory=False,
          dataloader_num_workers=8,
          remove_unused_columns=True,
          max_grad_norm=1.0,
          disable_tqdm=False,
          load_best_model_at_end=True,
-         metric_for_best_model="weighted_BCE",
-         greater_is_better=False,
+         metric_for_best_model="mcc",
+         greater_is_better=True,
       )
       return self.training_args
 
@@ -264,11 +295,41 @@ class ModelInstantiation():
         return float(np.mean(weighted_bin_crossentropy))
 
     def compute_metrics(self, eval_pred):
-        predictions, labels = eval_pred
-        probs_2d = np.exp(predictions) / np.exp(predictions).sum(axis=1, keepdims=True)
-        probs = probs_2d[:, 1]  # Keeping only positive class
+        logits, labels = eval_pred
+        
+        exp_logits = np.exp(logits - logits.max(axis=1, keepdims=True))  # numerically stable softmax
+        probs = exp_logits / exp_logits.sum(axis=1, keepdims=True)
+        pos_probs = probs[:, 1]
 
-        # FIX 5 (continued): compute weighted BCE from the eval batch's own label
+        # Now BCE is meaningful
+        with tf.device('/CPU:0'):
+            keras_bce = binary_crossentropy(labels.astype(np.float32), pos_probs.astype(np.float32))
+            keras_bce = float(np.mean(keras_bce.numpy())) 
+
+        pr_precision, pr_recall, thresholds = precision_recall_curve(labels, pos_probs)
+
+        # Find threshold that maximises F1 on class 1
+        f1_scores = 2 * (pr_precision * pr_recall) / (pr_precision + pr_recall + 1e-8)
+        f1_scores = f1_scores[:-1]  # align with thresholds array
+        best_thresh = thresholds[np.argmax(f1_scores)]
+
+        preds = (pos_probs >= best_thresh).astype(int)
+
+        return {
+            "f1_blame":              f1_score(labels, preds, pos_label=1),
+            "f1_average":            float(f1_score(labels, preds, average="macro")),
+            "mcc":                   matthews_corrcoef(labels, preds),
+            "best_threshold":        float(best_thresh),
+            "recall":                float(recall_score(labels, preds)),
+            "precision":             float(precision_score(labels, preds)),
+            "accuracy":              float(accuracy_score(labels, preds)),
+            "keras_bce":             float(keras_bce),
+            "number_of_true_preds":  int(sum(preds)),
+            "number_of_true_labels": int(sum(labels)),
+        }
+
+    
+        '''# FIX 5 (continued): compute weighted BCE from the eval batch's own label
         # distribution instead of passing train_data=None (which crashed previously)
         weighted_bce = self._weighted_bincrossentropy_from_labels(labels, probs)
 
@@ -277,18 +338,18 @@ class ModelInstantiation():
             keras_bce = float(np.mean(keras_bce.numpy()))
 
         return {
-            'keras_BCE': keras_bce,
-            'weighted_BCE': weighted_bce,
+            #'keras_BCE': keras_bce,
+            #'weighted_BCE': weighted_bce,
             'recall': float(recall_score(labels, probs.round())),
             'precision': float(precision_score(labels, probs.round())),
             'accuracy': float(accuracy_score(labels, probs.round())),
             'f1': float(f1_score(labels, probs.round(), average='macro')),
             'number_of_true_preds': int(sum(probs.round())),
             'number_of_true_labels': int(sum(labels))
-        }
+        }'''
 
 
-class WeightedLossTrainer(Trainer): #OBS CLASS WEIGHTS ARE NONE?
+'''class WeightedLossTrainer(Trainer): #OBS CLASS WEIGHTS ARE NONE?
     def __init__(self, *args, class_weights=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.class_weights = class_weights
@@ -300,6 +361,44 @@ class WeightedLossTrainer(Trainer): #OBS CLASS WEIGHTS ARE NONE?
 
         loss_fct = nn.CrossEntropyLoss(weight=self.class_weights.to(model.device))
         loss = loss_fct(logits, labels)
+
+        return (loss, outputs) if return_outputs else loss'''
+
+
+class FocalLoss(nn.Module):
+    def __init__(self, alpha=None, gamma=2.0, reduction="mean"):
+        super().__init__()
+        self.alpha = alpha  # class weights tensor, e.g. [1.0, 140.0]
+        self.gamma = gamma  # focusing parameter — higher = more focus on hard examples
+        self.reduction = reduction
+
+    def forward(self, logits, labels):
+        # Standard CE, unreduced
+        ce_loss = F.cross_entropy(logits, labels, weight=self.alpha, reduction="none")
+        
+        # Get the probability of the true class
+        pt = torch.exp(-ce_loss)
+        
+        # Apply focal scaling
+        focal_loss = (1 - pt) ** self.gamma * ce_loss
+
+        return focal_loss.mean() if self.reduction == "mean" else focal_loss.sum()
+
+
+class FocalLossTrainer(Trainer):
+    def __init__(self, *args, alpha=None, gamma=2.0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.alpha = alpha
+        self.gamma = gamma
+
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        labels = inputs.pop("labels")
+        outputs = model(**inputs)
+        logits = outputs.logits
+
+        alpha = self.alpha.to(logits.device) if self.alpha is not None else None
+        loss_fn = FocalLoss(alpha=alpha, gamma=self.gamma)
+        loss = loss_fn(logits, labels)
 
         return (loss, outputs) if return_outputs else loss
 
@@ -325,8 +424,18 @@ def load_data(model_instance, input_path, subset = None):
     data.rename(columns={'label': 'labels'}, inplace=True)
 
     if subset is not None:
-        df_0 = data[data['labels'] == 0].sample(n=subset // 2, random_state=42)
-        df_1 = data[data['labels'] == 1].sample(n=subset // 2, random_state=42)
+        df_0 = data[data['labels'] == 0]
+        df_1 = data[data['labels'] == 1]
+
+        n_1 = min(len(df_1), subset // 2)
+        n_0 = min(len(df_0), subset - n_1)  # fill remainder with negatives
+
+        if n_1 < subset // 2:
+            print(f"WARNING: Minority class (label=1) only has {len(df_1)} samples. "
+                  f"Using {n_1} positives and {n_0} negatives to reach {n_0 + n_1} total.")
+
+        df_0 = df_0.sample(n=n_0, random_state=42)
+        df_1 = df_1.sample(n=n_1, random_state=42)
         data = pd.concat([df_0, df_1]).sample(frac=1, random_state=42).reset_index(drop=True)
 
     dataset = Dataset.from_pandas(data)
@@ -352,11 +461,17 @@ def load_data(model_instance, input_path, subset = None):
 
     # Computing class weights from training split only
     label_counts = Counter(train_dataset['labels'])
-    total = len(train_dataset)
+    total = sum(label_counts.values())  # total training examples
+    
+    # In load_data, replace the last few lines:
     weight_for_0 = total / (2 * label_counts[0])
     weight_for_1 = total / (2 * label_counts[1])
 
-    return tokenized_eval, tokenized_train, torch.tensor([weight_for_0, weight_for_1], dtype=torch.float32)
+    raw_weights = torch.tensor([weight_for_0, weight_for_1], dtype=torch.float32)
+    sqrt_weights = torch.sqrt(raw_weights)          # compress extremes
+    sqrt_weights = sqrt_weights / sqrt_weights.min() # normalise so smallest = 1.0
+
+    return tokenized_eval, tokenized_train, sqrt_weights
 
 
 def read_best_weighted_bce(run_output_dir: Path, model_name: str) -> float:
@@ -390,7 +505,7 @@ def read_best_weighted_bce(run_output_dir: Path, model_name: str) -> float:
         state = json.load(f)
  
     # Extract the best_metric value recorded by the Trainer
-    # (metric_for_best_model = "weighted_BCE", greater_is_better = False)
+    # (metric_for_best_model = "weighted_BCE", greater_is_better = False) OBS now mcc
     best_metric = state.get("best_metric")
     if best_metric is not None:
         return float(best_metric)

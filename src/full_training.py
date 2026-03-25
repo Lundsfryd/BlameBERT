@@ -24,13 +24,13 @@ output_dir = os.path.join(root_dir,
 training_data_path = Path(os.path.join(data_dir, "4_5_agreement.jsonl" ))
 
 training_data_args = [
-    {"data_path": training_data_path, "learning_rate": 1e-4, "model_name": "full_training_lr_1e-4"},
+    {"data_path": training_data_path, "learning_rate": 5e-5, "model_name": "full_training_lr_5e-5"},
     {"data_path": training_data_path, "learning_rate": 1e-5, "model_name": "full_training_lr_1e-5"},
-    {"data_path": training_data_path, "learning_rate": 1e-6, "model_name": "full_training_lr_1e-6"}]
+    {"data_path": training_data_path, "learning_rate": 5e-6, "model_name": "full_training_lr_5e-6"}]
 
 
 
-overall_bwbe = float("inf") #artbitrarily high to ensure all from here is smaller
+overall_bwbe = float(0.0) #artbitrarily low to ensure all from here is greater
 best_model_path = None
 best_report_path = None
 
@@ -53,8 +53,9 @@ for t_args in training_data_args[:]:
         )
 
     current_wbce = read_best_weighted_bce(Path(output_dir), model_name = t_args['model_name'])
-
-    if current_wbce < overall_bwbe:
+    print(f"current_bce/mcc: {current_wbce}")
+    if current_wbce > overall_bwbe:
+        print(f"best_mcc: {current_wbce}")
         overall_bwbe = current_wbce
         best_model_path = os.path.join(output_dir, "full_models", t_args["model_name"])
         best_report_path = report_path

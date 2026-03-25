@@ -80,7 +80,7 @@ from transformers.trainer_callback import (
 import pandas as pd
 
 # make probe dataset
-def create_balanced_probe(dataset, n_samples=300):
+def create_balanced_probe(dataset, n_samples=300, tokenizer=None):
     df = dataset.to_pandas()
     n_per_class = n_samples // 2
 
@@ -88,11 +88,20 @@ def create_balanced_probe(dataset, n_samples=300):
     df_1 = df[df["labels"] == 1].sample(n=min(n_per_class, len(df[df["labels"] == 1])), random_state=42)
 
     balanced_df = pd.concat([df_0, df_1]).sample(frac=1, random_state=42)
-    # FIX 2: reset index before assigning sample_id to avoid leaking pandas index
     balanced_df = balanced_df.reset_index(drop=True)
     balanced_df["sample_id"] = range(len(balanced_df))
 
-    dataset = Dataset.from_pandas(balanced_df, preserve_index=False)  # add this flag
+    dataset = Dataset.from_pandas(balanced_df, preserve_index=False)
+
+    # Pad input_ids and attention_mask to the same length within this probe
+    max_len = max(len(x) for x in dataset["input_ids"])
+    def pad_to_max(example):
+        pad_len = max_len - len(example["input_ids"])
+        example["input_ids"] = example["input_ids"] + [0] * pad_len
+        example["attention_mask"] = example["attention_mask"] + [0] * pad_len
+        return example
+
+    dataset = dataset.map(pad_to_max)
     dataset.set_format(
         type="torch",
         columns=["input_ids", "attention_mask", "labels", "sample_id"]
@@ -284,19 +293,24 @@ class LayerEmbeddingVizCallback(TrainerCallback):
         self.layers_to_log = layers_to_log
         self.batch_size = batch_size
 
-    def on_epoch_end(
+    def on_evaluate(
         self,
         args: TrainingArguments,
         state: TrainerState,
         control: TrainerControl,
         **kwargs,
     ) -> None:
-        epoch = int(round(state.epoch))
+        # Use step if eval_strategy is steps, otherwise use epoch
+        if args.eval_strategy == "steps":
+            label = f"step_{state.global_step}"
+        else:
+            label = f"epoch_{int(round(state.epoch))}"
+        
         log_layer_embeddings(
             model=self.model,
             probe_dataset=self.probe_dataset,
             device=self.device,
-            epoch_label=f"epoch_{epoch}",
+            epoch_label=label,
             reduction=self.reduction,
             layers_to_log=self.layers_to_log,
             batch_size=self.batch_size,
