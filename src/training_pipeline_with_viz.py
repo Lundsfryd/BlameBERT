@@ -227,7 +227,7 @@ class ModelInstantiation():
             r=64,
             lora_alpha=128,
             lora_dropout=0.05,
-            target_modules="all-linear"
+            target_modules="all-linear" # LoRA style tune
         )
 
         self.lora_model = get_peft_model(base_model, lora_config)
@@ -237,7 +237,6 @@ class ModelInstantiation():
     def tokenize_function(self, examples):
         encoded = self.tokenizer(
             examples["text"],
-            #padding="max_length", # Removing for smart batching
             truncation=True,
             max_length=512,
         )
@@ -250,6 +249,7 @@ class ModelInstantiation():
          gradient_checkpointing=True,
          output_dir=output_path_checkpoints,
          learning_rate=self.learning_rate,
+         lr_scheduler_type="inverse_sqrt",
          num_train_epochs=5,
          per_device_train_batch_size=self.batch_size,
          per_device_eval_batch_size=self.batch_size,
