@@ -98,7 +98,7 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False,
     # -----------------------------------------------------------------------------------------
 
     model = ModelInstantiation(learning_rate = learning_rate, batch_size = batch_size)
-    wandb.init(project="mmbert-danish-politics", name=model_name)
+    wandb.init(project="final-mmbert-danish-politics", name=model_name)
 
     # FIX 1: Use the output_path directly — do not prepend ../../ which mangles user-provided paths
     output_model_dir = Path(output_dir)
@@ -114,16 +114,16 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False,
     )
     
     print(f"\napplied class weights: {class_weights}\n")
-    #probe_dataset = create_balanced_probe(tokenized_eval, n_samples=300)
+    probe_dataset = create_balanced_probe(tokenized_eval, n_samples=300)
 
     # ── Log the pre-training baseline BEFORE trainer.train() ─────────────────
-    #log_layer_embeddings(                                                   
-    #    model         = model.lora_model,
-    #    probe_dataset = probe_dataset,
-    #    device        = model.device,
-    #    epoch_label   = "pre-training",
-    #    layers_to_log = [0, 4, 8, 11],  # embed layer + 3 encoder checkpoints
-    #)
+    log_layer_embeddings(                                                   
+        model         = model.lora_model,
+        probe_dataset = probe_dataset,
+        device        = model.device,
+        epoch_label   = "pre-training",
+        layers_to_log = [0, 4, 8, 11],  # embed layer + 3 encoder checkpoints
+    )
 
     print("initializing trainer")
     training_args = model.training_setup(
@@ -141,42 +141,18 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False,
         compute_metrics=model.compute_metrics,  # Custom metrics function
         data_collator=model.data_collator,
         callbacks=[
-            #LayerEmbeddingVizCallback(                
-            #    model         = model.lora_model,
-            #    probe_dataset = probe_dataset,
-            #    device        = model.device,
-            #    layers_to_log = [0, 4, 8, 11],       # same layers as baseline
-            #    reduction     = "umap",               # or "pca" for speed
-            #),
+            LayerEmbeddingVizCallback(                
+                model         = model.lora_model,
+                probe_dataset = probe_dataset,
+                device        = model.device,
+                layers_to_log = [0, 4, 8, 11],       # same layers as baseline
+                reduction     = "umap",               # or "pca" for speed
+            ),
             EarlyStoppingCallback(
-            early_stopping_patience=3,   # stop after 5 evals with no improvement
+            early_stopping_patience=1,   # stop after 1 evals with no improvement
             ),
         ],
         )
-        
-    '''trainer = WeightedLossTrainer(  # Custom trainer function taking class balance into account
-        model=model.lora_model,  # LoRA parameters
-        args=model.training_setup(
-            output_path_checkpoints=str(output_model_dir / "checkpoints" / model_name)
-        ),
-        train_dataset=tokenized_train,
-        eval_dataset=tokenized_eval,
-        compute_metrics=model.compute_metrics,  # Custom metrics function
-        class_weights=class_weights,  # Weighted by presence in dataset
-        data_collator=model.data_collator,
-        callbacks=[
-            #LayerEmbeddingVizCallback(                
-            #    model         = model.lora_model,
-            #    probe_dataset = probe_dataset,
-            #    device        = model.device,
-            #    layers_to_log = [0, 4, 8, 11],       # same layers as baseline
-            #    reduction     = "umap",               # or "pca" for speed
-            #),
-            EarlyStoppingCallback(
-            early_stopping_patience=3,   # stop after 5 evals with no improvement
-            ),
-        ],
-    )'''
 
     print("trainer.train")
     trainer.train()
@@ -188,8 +164,10 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False,
         with tf.device('/CPU:0'):
             predictions_output = trainer.predict(tokenized_eval)
         
-        preds = np.exp(predictions_output.predictions)
-        preds = (preds / preds.sum(axis=1, keepdims=True))[:, 1].round().astype(int)
+        logits = predictions_output.predictions
+        logits -= logits.max(axis=1, keepdims=True)
+        probs = np.exp(logits) / np.exp(logits).sum(axis=1, keepdims=True)
+        preds = (probs[:, 1] >= 0.5).astype(int)
         labels = predictions_output.label_ids
 
         os.makedirs(Path(report_path).parent, exist_ok=True)
@@ -203,7 +181,8 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False,
         save_dir = output_model_dir / "full_models" / model_name
         print(f"\n\n#### Saving full model to {save_dir} ####\n\n")
         os.makedirs(save_dir, exist_ok=True)
-        trainer.model.save_pretrained(str(save_dir))
+        merged_model = trainer.model.merge_and_unload()  # merges LoRA deltas into base weights
+        merged_model.save_pretrained(str(save_dir))
         model.tokenizer.save_pretrained(str(save_dir))
     else:
         # Remove checkpoints directory if we don't want anything saved
@@ -214,9 +193,7 @@ def model_trainer(data_input_path, output_dir, model_name, save_model=False,
     
     wandb.finish(exit_code = 0)
 
-
-    best_mcc = trainer.state.best_metric   # HF Trainer stores this automatically
-    return trainer.model, best_mcc
+    return trainer.model
 
 
 # %%
@@ -272,15 +249,15 @@ class ModelInstantiation():
          #save_strategy="steps",
          #eval_steps=500,
          #save_steps=500,
-         #save_total_limit=3,
+         save_total_limit=1,
          dataloader_pin_memory=False,
          dataloader_num_workers=8,
          remove_unused_columns=True,
          max_grad_norm=1.0,
          disable_tqdm=False,
          load_best_model_at_end=True,
-         metric_for_best_model="mcc",
-         greater_is_better=True,
+         metric_for_best_model="eval_loss",
+         greater_is_better=False,
          lr_scheduler_type=lr_scheduler,
       )
       return self.training_args
@@ -310,73 +287,35 @@ class ModelInstantiation():
     def compute_metrics(self, eval_pred):
         logits, labels = eval_pred
         
-        exp_logits = np.exp(logits - logits.max(axis=1, keepdims=True))  # numerically stable softmax
+        exp_logits = np.exp(logits - logits.max(axis=1, keepdims=True))
         probs = exp_logits / exp_logits.sum(axis=1, keepdims=True)
         pos_probs = probs[:, 1]
 
-        # Now BCE is meaningful
+        # Fixed threshold predictions — used for all metrics
+        preds = (pos_probs >= 0.5).astype(int)
+
+        # BCE
         with tf.device('/CPU:0'):
             keras_bce = binary_crossentropy(labels.astype(np.float32), pos_probs.astype(np.float32))
-            keras_bce = float(np.mean(keras_bce.numpy())) 
+            keras_bce = float(np.mean(keras_bce.numpy()))
 
+        # Best threshold as diagnostic metadata only — does not affect any metric
         pr_precision, pr_recall, thresholds = precision_recall_curve(labels, pos_probs)
-
-        # Find threshold that maximises F1 on class 1
         f1_scores = 2 * (pr_precision * pr_recall) / (pr_precision + pr_recall + 1e-8)
-        f1_scores = f1_scores[:-1]  # align with thresholds array
-        best_thresh = thresholds[np.argmax(f1_scores)]
-
-        preds = (pos_probs >= best_thresh).astype(int)
+        best_thresh = float(thresholds[np.argmax(f1_scores[:-1])])
 
         return {
-            "f1_blame":              f1_score(labels, preds, pos_label=1),
+            "f1_blame":              float(f1_score(labels, preds, pos_label=1)),
             "f1_average":            float(f1_score(labels, preds, average="macro")),
-            "mcc":                   matthews_corrcoef(labels, preds),
-            "best_threshold":        float(best_thresh),
+            "mcc":                   float(matthews_corrcoef(labels, preds)),
             "recall":                float(recall_score(labels, preds)),
             "precision":             float(precision_score(labels, preds)),
             "accuracy":              float(accuracy_score(labels, preds)),
-            "keras_bce":             float(keras_bce),
+            "keras_bce":             keras_bce,
+            "best_threshold":        best_thresh,  # diagnostic only — tells you if model is conservative or trigger happy
             "number_of_true_preds":  int(sum(preds)),
             "number_of_true_labels": int(sum(labels)),
         }
-
-    
-        '''# FIX 5 (continued): compute weighted BCE from the eval batch's own label
-        # distribution instead of passing train_data=None (which crashed previously)
-        weighted_bce = self._weighted_bincrossentropy_from_labels(labels, probs)
-
-        with tf.device('/CPU:0'):                          
-            keras_bce = binary_crossentropy(labels.astype(np.float32), probs.astype(np.float32))
-            keras_bce = float(np.mean(keras_bce.numpy()))
-
-        return {
-            #'keras_BCE': keras_bce,
-            #'weighted_BCE': weighted_bce,
-            'recall': float(recall_score(labels, probs.round())),
-            'precision': float(precision_score(labels, probs.round())),
-            'accuracy': float(accuracy_score(labels, probs.round())),
-            'f1': float(f1_score(labels, probs.round(), average='macro')),
-            'number_of_true_preds': int(sum(probs.round())),
-            'number_of_true_labels': int(sum(labels))
-        }'''
-
-
-'''class WeightedLossTrainer(Trainer): #OBS CLASS WEIGHTS ARE NONE?
-    def __init__(self, *args, class_weights=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.class_weights = class_weights
-
-    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
-        labels = inputs.pop("labels")
-        outputs = model(**inputs)
-        logits = outputs.logits
-
-        loss_fct = nn.CrossEntropyLoss(weight=self.class_weights.to(model.device))
-        loss = loss_fct(logits, labels)
-
-        return (loss, outputs) if return_outputs else loss'''
-
 
 class FocalLoss(nn.Module):
     def __init__(self, alpha=None, gamma=2.0, reduction="mean"):
@@ -419,7 +358,7 @@ class FocalLossTrainer(Trainer):
 # %%
 def read_jsonl(file_path):
     """Read a jsonl file and return a list of records."""
-    print(f'\n\n#### Reading "{file_path}" for training / test data (90/10 split) ####\n\n')
+    print(f'\n\n#### Reading "{file_path}" for training / test data (80/20 split) ####\n\n')
     records = []
     with open(file_path, 'r', encoding='utf-8') as f:
         for line in f:
@@ -453,8 +392,8 @@ def load_data(model_instance, input_path, subset=None, alpha_mode="sqrt"):
 
     dataset = Dataset.from_pandas(data)
 
-    # 90/10 train/eval split
-    dataset = dataset.train_test_split(test_size=0.1, seed=42)
+    # 80/20 train/eval split
+    dataset = dataset.train_test_split(test_size=0.2, seed=42)
     eval_dataset = dataset["test"]
     train_dataset = dataset["train"]
 
@@ -496,56 +435,6 @@ def load_data(model_instance, input_path, subset=None, alpha_mode="sqrt"):
     print(f"  alpha_mode={alpha_mode} → weights: {scaled.tolist()}")
  
     return tokenized_eval, tokenized_train, scaled
-
-
-def read_best_weighted_bce(run_output_dir: Path, model_name: str) -> float:
-    """
-    Parse the best eval weighted_BCE from the HuggingFace trainer_state.json
-    that is written inside the best checkpoint folder.
- 
-    Falls back to a large sentinel value (1e9) if the file cannot be found,
-    so the sweep still completes and the run is ranked last.
-    """
-    checkpoint_root = run_output_dir / "checkpoints" / model_name
- 
-    if not checkpoint_root.exists():
-        print(f"  [WARNING] checkpoint dir not found: {checkpoint_root}")
-        return float("1e9")
- 
-    # trainer_state.json is in every checkpoint sub-folder; pick the last one.
-    state_files = sorted(checkpoint_root.glob("checkpoint-*/trainer_state.json"))
-    if not state_files:
-        # HF also writes a trainer_state.json directly in the output_dir
-        direct = checkpoint_root / "trainer_state.json"
-        if direct.exists():
-            state_files = [direct]
- 
-    if not state_files:
-        print(f"  [WARNING] no trainer_state.json found under {checkpoint_root}")
-        return float("1e9")
- 
-    # Use the last checkpoint's state (most recent epoch)
-    with open(state_files[-1]) as f:
-        state = json.load(f)
- 
-    # Extract the best_metric value recorded by the Trainer
-    # (metric_for_best_model = "weighted_BCE", greater_is_better = False) OBS now mcc
-    best_metric = state.get("best_metric")
-    if best_metric is not None:
-        return float(best_metric)
- 
-    # Fallback: scan the log history for the minimum eval/weighted_BCE
-    log_history = state.get("log_history", [])
-    bce_values = [
-        entry["eval_weighted_BCE"]
-        for entry in log_history
-        if "eval_weighted_BCE" in entry
-    ]
-    if bce_values:
-        return min(bce_values)
- 
-    print(f"  [WARNING] weighted_BCE not found in trainer_state for {model_name}")
-    return float("1e9")
 
 # %%
 if __name__ == "__main__":

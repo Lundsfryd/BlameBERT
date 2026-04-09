@@ -4,7 +4,6 @@ import itertools
 import json
 from pathlib import Path
 from training_setup import model_trainer
-from blame_detection import BlameDetector
 import gc
 
 # ------------------------------------------------------------------- #
@@ -28,7 +27,7 @@ datasets = [
 ]
 
 # ── Hyperparameter grid ──────────────────────────────────────────────
-LEARNING_RATES   = [1e-6, 1e-5, 1e-4]
+LEARNING_RATES   = [1e-5, 1e-4, 5e-4]
 LR_SCHEDULERS    = ["linear"]
 ALPHA_MODES      = ["sqrt", "two_thirds", "raw"]   # applied inside model_trainer via load_data
 # --------------------------------------------------------------------
@@ -51,8 +50,6 @@ print(f"  ({len(datasets)} datasets × {len(LEARNING_RATES)} LRs × "
       f"{len(LR_SCHEDULERS)} schedulers × {len(ALPHA_MODES)} alpha modes)")
 print(f"{'='*60}\n")
 
-results_log = []   # collect all run summaries for inspection after sweep
-
 for run_idx, (ds, lr, scheduler, alpha_mode) in enumerate(sweep, 1):
 
     run_name = (f"{ds['model_name']}"
@@ -65,7 +62,7 @@ for run_idx, (ds, lr, scheduler, alpha_mode) in enumerate(sweep, 1):
     report_path = os.path.join(output_dir, f"report__{run_name}.txt")
 
     try:
-        model, best_mcc = model_trainer(
+        model = model_trainer(
             data_input_path=ds["path"],
             output_dir=output_dir,
             model_name=run_name,
@@ -80,56 +77,8 @@ for run_idx, (ds, lr, scheduler, alpha_mode) in enumerate(sweep, 1):
 
     except Exception as e:
         print(f"  [ERROR] Run failed: {e}")
-        results_log.append({"run": run_name, "mcc": None, "error": str(e)})
         continue
 
-    results_log.append({"run": run_name, "mcc": best_mcc})
-    print(f"  → best val MCC: {best_mcc:.4f}")
-
-    # Track best model per dataset
-    ds_key = ds["model_name"]
-    if ds_key not in best_per_dataset or best_mcc > best_per_dataset[ds_key]["mcc"]:
-        best_per_dataset[ds_key] = {
-            "mcc":      best_mcc,
-            "model":    model,
-            "run_name": run_name,
-        }
-    else:
-        # Not the best — free memory immediately
-        del model
-        torch.cuda.empty_cache()
-        gc.collect()
-
-# ── Final evaluation: run BlameDetector on best model per dataset ────
-print(f"\n{'='*60}")
-print("  Sweep complete. Running BlameDetector on best models.")
-print(f"{'='*60}\n")
-
-for ds_key, best in best_per_dataset.items():
-    print(f"\n[BlameDetector] {ds_key}  (run: {best['run_name']},  MCC: {best['mcc']:.4f})")
-
-    report_path = os.path.join(output_dir, f"blame_detector_report__{best['run_name']}.txt")
-
-    try:
-        detector = BlameDetector(
-            model_path=best["model"],
-            max_length=512,
-            batch_size=256,
-            model_from_path=False,
-        )
-        detector.run_validation(validation_data_path, report_path)
-        del detector
-
-    except Exception as e:
-        print(f"  [ERROR] BlameDetector failed for {ds_key}: {e}")
-
-    del best["model"]
+    del model
     torch.cuda.empty_cache()
     gc.collect()
-
-# ── Save full results log ────────────────────────────────────────────
-log_path = os.path.join(output_dir, "sweep_results.json")
-with open(log_path, "w") as f:
-    json.dump(results_log, f, indent=2)
-
-print(f"\nAll results saved to {log_path}")

@@ -8,12 +8,12 @@ API call to download all tables from wandb
 OBS: should take run as argument, in order not to overlap
 """
 
-run = None #eg 68nf8w58
+run = "wbhkcfpq" #eg 68nf8w58
 
 api = wandb.Api()
-run = api.run(f"markuslundsfryd-aarhus-university/mmbert-danish-politics/{run}")
+run = api.run(f"markuslundsfryd-aarhus-university/final-mmbert-danish-politics/{run}")
 
-output_dir = Path("/work/MarkusLundsfrydJensen#1865/data_outside_git/embedding_data")
+output_dir = Path("/work/MarkusLundsfrydJensen#1865/Bachelor_project/training_output/embedding_data") # fix makedir
 output_dir.mkdir(exist_ok=True)
 
 for f in run.files():

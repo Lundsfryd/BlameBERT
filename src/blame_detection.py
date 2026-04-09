@@ -3,6 +3,8 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 from tqdm import tqdm
 import numpy as np
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, classification_report, confusion_matrix
+from peft import PeftModel, PeftConfig
+
 
 class BlameDetector(object):
 
@@ -12,7 +14,7 @@ class BlameDetector(object):
         self.max_length = max_length
         self.batch_size = batch_size
         self.model_from_path = model_from_path
-
+        
         self.model_initialization()
 
         return
