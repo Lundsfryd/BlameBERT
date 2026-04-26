@@ -65,8 +65,7 @@ inf_data = read_csv("/work/MarkusLundsfrydJensen#1865/Bachelor_project/data/infe
 inf_data$date = as.Date(inf_data$date)
 
 #Get the month
-inf_data$month <- format(inf_data$date,"%y-%m")
-inf_data$month <- as.yearmon(inf_data$month, "%y-%m")
+inf_data$month <- as.yearmon(inf_data$date)
 # Extract only the year
 inf_data$year <- as.numeric(format(inf_data$month, "%y"))
 
@@ -180,7 +179,14 @@ monthly_blame$wingness <- as.numeric(monthly_blame$wingness)
 
 monthly_blame$year <- as.integer(monthly_blame$year)
 
-monthly_blame$month_index <- as.integer(12 * (as.integer(format(monthly_blame$month, "%Y")) - 1997) + (as.integer(format(monthly_blame$month, "%m")) - 1))
+monthly_blame$month_index <- with(monthly_blame,
+  12 * (as.integer(format(month, "%Y")) - as.integer(format(min(month), "%Y"))) +
+  (as.integer(format(month, "%m")) - as.integer(format(min(month), "%m")))
+)
+
+monthly_blame$month_index_scaled <- scale(monthly_blame$month_index)
+monthly_blame$month_index_scaled_sqrt <- scale(monthly_blame$month_index^2)
+
 
 ```
 
@@ -232,6 +238,28 @@ anova(model_blame_time_1, model_blame_time_2, model_blame_time_3)
 ```{r}
 model_check(model_blame_time_3)
 ```
+
+#Find global minimum
+
+```{r}
+b1 <- fixef(model_blame_time_3)$cond["scale(month_index)"]
+b2 <- fixef(model_blame_time_3)$cond["I(scale(month_index)^2)"]
+
+x_star <- -b1 / (2 * b2)
+
+m <- mean(monthly_blame$month_index)
+s <- sd(monthly_blame$month_index)
+
+month_star <- x_star * s + m
+
+print(month_star)
+
+print(231/12)
+```
+
+
+
+
 #regarding random effects:
 The variance of the random slope is very small (0.009 vs 0.061 for the intercept), meaning parties barely differ in how they respond to government status — the random slope is adding very little while destabilising the model. Switched to simple intercept for party.
 The random intercept alone is the defensible and stable choice here. You can justify dropping the random slope by noting that the variance component was negligible and the model showed signs of overparameterisation given 14 groups — this is a principled simplification, not a shortcut.
@@ -356,6 +384,11 @@ model_bloc_bloc_wing_int <- glmmTMB(total_blame ~ in_gov*bloc + bloc * wingness 
 
 summary(model_bloc_bloc_wing_int)
 ```
+```{r}
+exp(0.553758)
+```
+
+
 
 ```{r}
 anova(model_intercept,model_in_gov,model_bloc,model_bloc_wing,model_bloc_wing_int, model_bloc_bloc_wing_int)
@@ -380,7 +413,22 @@ model_check(model_bloc_bloc_wing_int)
 summary(model_bloc_bloc_wing_int)
 ```
 
+
+
+
 #plot it
+
+```{r}
+model_bloc_bloc_wing_int <- glmmTMB(total_blame ~ in_gov*bloc + bloc * wingness + month_index_scaled + month_index_scaled_sqrt + (1 | party) +
+                             offset(log(total_nr_sentences)),
+                           family = nbinom1,
+                           data = monthly_blame)
+
+summary(model_bloc_bloc_wing_int)
+```
+
+
+
 ```{r}
 sjPlot::plot_model(model_bloc_bloc_wing_int, 
                    type = "pred", 
@@ -462,7 +510,7 @@ summary(model_block_int_quadratic)
 monthly_blame_18 <- monthly_blame %>% 
   filter(year >=19) %>% 
   filter(year <=26) %>% 
-  mutate(month_index = month_index-264)
+  mutate(month_index = month_index-255)
 ```
 
 
@@ -535,12 +583,21 @@ anova(model_intercept_18, model_in_gov_18, model_bloc_18, model_bloc_wing_18, mo
 ```
 
 ```{r}
+anova(model_in_gov_18, model_bloc_wing_int_18, model_in_gov_bloc_wing_int_18)
+```
+
+
+
+```{r}
 anova(model_in_gov_18, model_bloc_wing_int_18)
 ```
 
 ```{r}
 #best model
 summary(model_bloc_wing_int_18)
+```
+```{r}
+exp(0.8171468)
 ```
 
 #check assumption of best model
@@ -596,9 +653,9 @@ sjPlot::plot_model(model_bloc_wing_int_18,
 
 sjPlot::plot_model(model_bloc_wing_int_18, 
                    type = "pred", 
-                   terms = c("in_gov","wingness"), 
+                   terms = c("bloc","wingness"), 
                    condition = c(total_nr_sentences = 100),
-                   axis.title = c("in_gov", "Predicted Blame Counts pr 100 Uttered Sentences"),
+                   axis.title = c("bloc", "Predicted Blame Counts pr 100 Uttered Sentences"),
                    title = "Predicted Blame by Wing status in period 2019-2022",
                    #ci.lvl = NA,
                    #axis.lim = c(3,12)
@@ -647,6 +704,9 @@ model_check(model_blame_time_18)
 #best model
 summary(model_blame_time_18)
 ```
+```{r}
+exp(0.092078)
+```
 
 #Plot this model
 
@@ -658,7 +718,7 @@ sjPlot::plot_model(model_blame_time_18,
                    axis.title = c("Month since Jan 2019", "Predicted Blame Counts pr 100 Uttered Sentences"),
                    title = "Evolution of the Use of Blame in period 2019-2022",
                    #ci.lvl = NA,
-                    axis.lim = c(3,14)
+                    #axis.lim = c(3,14)
                    ) +
   theme_minimal()
 ```
