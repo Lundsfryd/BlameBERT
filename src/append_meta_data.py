@@ -66,11 +66,12 @@ def jsonl_to_csv(jsonl_path, csv_path):
 
 
 # Step 1: Add in_gov
-add_in_gov_to_jsonl(
-    "/work/MarkusLundsfrydJensen#1865/Bachelor_project/data/inference/predicted_inference_data.jsonl",
-    "/work/MarkusLundsfrydJensen#1865/Bachelor_project/data/inference/predicted_inference_data_with_gov.jsonl"
-)
+#add_in_gov_to_jsonl(
+#    "/work/MarkusLundsfrydJensen#1865/Bachelor_project/data/inference/predicted_inference_data.jsonl",
+#    "/work/MarkusLundsfrydJensen#1865/Bachelor_project/data/inference/predicted_inference_data_with_gov.jsonl"
+#)
 
+print("doing csv")
 # Step 2: Convert to CSV
 jsonl_to_csv(
     "/work/MarkusLundsfrydJensen#1865/Bachelor_project/data/inference/predicted_inference_data_with_gov.jsonl",

@@ -1,0 +1,676 @@
+---
+title: "analysis_v2"
+output: html_document
+date: "2026-04-10"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+#load packages
+
+```{r, echo=FALSE, include=FALSE}
+install.packages("pacman")
+library(pacman)
+
+pacman::p_load("tidyverse", "lubridate", "zoo", "glmmTMB", "DHARMa", "emmeans", "sjPlot")
+
+```
+
+
+```{r}
+#assumption check function
+overdisp_fun <- function(model) {
+  rdf <- df.residual(model)
+  rp <- residuals(model,type="pearson")
+  Pearson.chisq <- sum(rp^2)
+  prat <- Pearson.chisq/rdf
+  pval <- pchisq(Pearson.chisq, df=rdf, lower.tail=FALSE)
+  c(chisq=Pearson.chisq,ratio=prat,rdf=rdf,p=pval)
+}
+
+
+model_check <- function(model_name){
+  hist(resid(model_name))
+  
+  overdisp_fun(model_name)
+  
+  plot(fitted(model_name), resid(model_name)) #residuals vs fitted
+  abline(h=0)
+  
+  sim_res <- simulateResiduals(model_name, n = 1000)
+
+  # QQ plot
+  #plotQQunif(sim_res)   # QQ plot for simulated residuals
+  plot(sim_res) 
+  testUniformity(sim_res)      # Overall distribution
+  testDispersion(sim_res)      # Over/underdispersion
+  testZeroInflation(sim_res)   # Excess zeros
+  testOutliers(sim_res, type = 'bootstrap')        # Outlying observations
+  
+  print(overdisp_fun(model_name))
+  
+}
+```
+
+
+
+#load data
+```{r}
+inf_data = read_csv("/work/MarkusLundsfrydJensen#1865/Bachelor_project/data/inference/predicted_inference_data_with_gov.csv")
+
+#Make date column into date object
+inf_data$date = as.Date(inf_data$date)
+
+#Get the month
+inf_data$month <- format(inf_data$date,"%y-%m")
+inf_data$month <- as.yearmon(inf_data$month, "%y-%m")
+# Extract only the year
+inf_data$year <- as.numeric(format(inf_data$month, "%y"))
+
+inf_data$party = as.factor(inf_data$party)
+```
+
+
+
+```{r}
+
+#Omitted parties
+#NA, "UP", "FRI" "CD"  "LH"  "FP"  "IA"  "SIU" "T"   "UFG" "FF" "SP" "NQ"  "JF"   , "-"
+parties_to_keep <- c("S", "DF", "EL", "SF", "V", "RV", "KD", "LA", "DD", "KF", "ALT", "NB", "M" )
+
+#name parties that changed name
+inf_data$party[inf_data$party == 'KRF'] <- 'KD'
+
+#Ny alliance og LA
+inf_data$party[inf_data$party == 'NY'] <- 'LA'
+
+inf_data_filtered <- inf_data %>% 
+  filter(party %in% parties_to_keep) %>% 
+  mutate(party = droplevels(party))
+
+```
+
+
+#Make personal leaderboard
+```{r}
+blame_leaderboard <- inf_data_filtered %>% 
+  group_by(speaker) %>% 
+  summarise(total_blame = sum(prediction),
+            n_sent = n(),
+            blame_percentage = (total_blame/n_sent)*100,
+            parties = list(unique(party))) %>% 
+  filter(n_sent>=1000) %>% 
+  ungroup() %>% 
+  arrange(desc(blame_percentage))
+
+
+head(blame_leaderboard, 10)
+```
+
+#Make party leaderboard
+
+```{r}
+party_leaderboard <- inf_data_filtered %>% 
+  group_by(party) %>% 
+  summarise(party_n_sent = n(),
+            party_blame = sum(prediction),
+            party_blame_percentage = (party_blame/party_n_sent)*100) %>% 
+  filter(party_n_sent>=1000) %>% 
+  arrange(desc(party_blame_percentage)) %>% 
+  ungroup()
+
+head(party_leaderboard)
+```
+
+
+```{r, echo=FALSE}
+#make montly blame count pr party along with number of sentences
+
+monthly_blame <- inf_data_filtered %>% 
+  group_by(month, party) %>% 
+  summarise(in_gov = first(in_gov),
+            total_nr_sentences = n(),
+            total_blame = sum(prediction),
+            year = unique(year)) %>% 
+  ungroup()
+```
+
+
+```{r}
+# Read the extracted pairs
+party_wingness <- read.csv("../python/bloc_and_wingness.csv")
+
+party_wingness <- party_wingness %>% 
+  select(party, bloc, wingness) %>% 
+  mutate(
+    bloc = as.character(bloc),  # avoid factor issues
+    bloc = case_when(
+      bloc == "left_bloc" ~ "right_bloc",
+      bloc == "right_bloc" ~ "left_bloc",
+      TRUE ~ bloc
+    ),
+    bloc = as.factor(bloc)
+  )
+
+table(party_wingness$bloc)
+
+
+print(head(party_wingness))
+
+print(head(monthly_blame))
+
+# Merge/append to your existing R dataframe by party
+monthly_blame <- merge(monthly_blame, party_wingness, by = "party", all.x = TRUE)
+
+print(head(monthly_blame))
+print(str(monthly_blame))
+```
+
+```{r}
+monthly_blame$bloc <- as.factor(monthly_blame$bloc)
+
+monthly_blame$in_gov <- as.factor(monthly_blame$in_gov)
+
+monthly_blame$total_blame <- as.integer(monthly_blame$total_blame)
+
+monthly_blame$wingness <- as.numeric(monthly_blame$wingness)
+
+monthly_blame$year <- as.integer(monthly_blame$year)
+
+monthly_blame$month_index <- as.integer(12 * (as.integer(format(monthly_blame$month, "%Y")) - 1997) + (as.integer(format(monthly_blame$month, "%m")) - 1))
+
+```
+
+```{r}
+print(str(monthly_blame))
+```
+
+
+
+
+
+#Blame predicted by time
+
+
+```{r}
+model_blame_time_1 <- glmmTMB(total_blame ~ 1 + in_gov + (1|party) + offset(log(total_nr_sentences)), 
+                           family = nbinom1, 
+                           data = monthly_blame)
+summary(model_blame_time_1)
+diagnose(model_blame_time_1)
+```
+
+
+
+```{r}
+model_blame_time_2 <- glmmTMB(total_blame ~ scale(month_index) + in_gov + (1|party) + offset(log(total_nr_sentences)), 
+                           family = nbinom1, 
+                           data = monthly_blame)
+summary(model_blame_time_2)
+diagnose(model_blame_time_2)
+```
+
+```{r}
+model_blame_time_3 <- glmmTMB(total_blame ~ scale(month_index) + I(scale(month_index)^2) + in_gov + (1|party) + offset(log(total_nr_sentences)),
+                           family = nbinom1, 
+                           data = monthly_blame)
+
+summary(model_blame_time_3)
+diagnose(model_blame_time_3)
+```
+
+
+
+```{r}
+anova(model_blame_time_1, model_blame_time_2, model_blame_time_3)
+```
+
+#check assumptions
+```{r}
+model_check(model_blame_time_3)
+```
+#regarding random effects:
+The variance of the random slope is very small (0.009 vs 0.061 for the intercept), meaning parties barely differ in how they respond to government status — the random slope is adding very little while destabilising the model. Switched to simple intercept for party.
+The random intercept alone is the defensible and stable choice here. You can justify dropping the random slope by noting that the variance component was negligible and the model showed signs of overparameterisation given 14 groups — this is a principled simplification, not a shortcut.
+
+#regarding zero deflation:
+Option B — Keep nbinom1 and acknowledge the limitation:
+Simply note in your methods section that the model shows mild zero deflation affecting 1.2% of observations, that this does not materially affect your substantive conclusions, and that dispersion is otherwise well specified. Reviewers will accept this given the scale of the issue.
+
+Practically Speaking
+Given that dispersion is fine and the KS test is the only remaining concern, Option B is likely sufficient for most research contexts. The KS test is sensitive enough that 31 mishandled zeros out of 2538 observations can produce a significant result even when the model is otherwise well specified. This is a known limitation of the test at large sample sizes rather than evidence of a serious model misspecification.
+
+
+
+```{r}
+# Raw count
+table(monthly_blame$total_blame == 0)
+
+# As proportion
+mean(monthly_blame$total_blame == 0)
+
+# Which parties produce zeros?
+monthly_blame %>% 
+  group_by(party) %>% 
+  summarise(zero_months = sum(total_blame == 0),
+            total_months = n(),
+            zero_pct = mean(total_blame == 0))
+```
+
+
+#regarding nbinom 1 or 2:
+For parliamentary speech data, nbinom1 is often the better fit because blame counts tend to scale proportionally with how much a party speaks — which your offset already partially controls for. The fact that nbinom1 is already outperforming nbinom2 in your models is consistent with this.
+
+#Plot best model
+
+#OBS plot intercept with confidence intervals. Also change colros of random effects to match red/blue bloc, OBS BIas correction
+
+```{r}
+#install.packages("sjPlot")
+
+library(sjPlot)
+
+sjPlot::plot_model(model_blame_time_3, type = "re")
+
+#Due to the offset, in order to do meaningfull interpretation, the total number of sentences must be kept constant. Thus the following plot shows the change in predicted amount of blame pr 1000 sentences uttered as time goes on  
+sjPlot::plot_model(model_blame_time_3, 
+                   type = "pred", 
+                   terms = "month_index[all]", 
+                   condition = c(total_nr_sentences = 100),
+                   axis.title = c("Months after Jan 2000", "Predicted Blame Counts pr 100 Uttered Sentences"),
+                   title = "General Evolution of Blame in the Danish Parliament over time",
+                   #ci.lvl = NA,
+                   #axis.lim = c(3,12)
+                   ) +
+  theme_minimal()
+```
+
+
+# Interpretation
+
+
+
+#Now for political predictors of blame
+Given your research question in Family 2 is about political characteristics, time is a confounder to control for, not a grouping structure to model. A fixed effect is simpler and more appropriate:
+
+
+```{r}
+model_intercept <- glmmTMB(total_blame ~ 1 + scale(month_index) + I(scale(month_index)^2) + (1|party) + offset(log(total_nr_sentences)), 
+                           family = nbinom1, 
+                           data = monthly_blame)
+
+summary(model_intercept)
+diagnose(model_intercept)
+```
+
+```{r}
+model_in_gov <- glmmTMB(total_blame ~ in_gov + scale(month_index) + I(scale(month_index)^2) + (1 | party) +
+                          offset(log(total_nr_sentences)),
+                        family = nbinom1,
+                        data = monthly_blame)
+
+summary(model_in_gov)
+diagnose(model_in_gov)
+```
+
+
+
+```{r}
+model_bloc <- glmmTMB(total_blame ~ in_gov + bloc + scale(month_index) + I(scale(month_index)^2) + (1 | party) +
+                         offset(log(total_nr_sentences)),
+                       family = nbinom1,
+                       data = monthly_blame)
+
+summary(model_bloc)
+diagnose(model_bloc)
+```
+
+```{r}
+model_bloc_wing <- glmmTMB(total_blame ~ in_gov + bloc + wingness + scale(month_index) + I(scale(month_index)^2) + (1 | party) +
+                         offset(log(total_nr_sentences)),
+                       family = nbinom1,
+                       data = monthly_blame)
+
+summary(model_bloc_wing)
+diagnose(model_bloc_wing)
+```
+
+
+```{r}
+model_bloc_wing_int <- glmmTMB(total_blame ~ in_gov + bloc * wingness + scale(month_index) + I(scale(month_index)^2) + (1 | party) +
+                             offset(log(total_nr_sentences)),
+                           family = nbinom1,
+                           data = monthly_blame)
+
+summary(model_bloc_wing_int)
+```
+
+```{r}
+model_bloc_bloc_wing_int <- glmmTMB(total_blame ~ in_gov*bloc + bloc * wingness + scale(month_index) + I(scale(month_index)^2) + (1 | party) +
+                             offset(log(total_nr_sentences)),
+                           family = nbinom1,
+                           data = monthly_blame)
+
+summary(model_bloc_bloc_wing_int)
+```
+
+```{r}
+anova(model_intercept,model_in_gov,model_bloc,model_bloc_wing,model_bloc_wing_int, model_bloc_bloc_wing_int)
+```
+
+```{r}
+anova(model_in_gov, model_bloc_wing, model_bloc_wing_int, model_bloc_bloc_wing_int)
+```
+
+```{r}
+anova(model_in_gov, model_bloc_wing_int, model_bloc_bloc_wing_int)
+```
+
+#check assumptions of best model
+
+```{r}
+model_check(model_bloc_bloc_wing_int)
+```
+
+
+```{r}
+summary(model_bloc_bloc_wing_int)
+```
+
+#plot it
+```{r}
+sjPlot::plot_model(model_bloc_bloc_wing_int, 
+                   type = "pred", 
+                   terms = c("in_gov", "bloc"), 
+                   condition = c(total_nr_sentences = 100),
+                   axis.title = c("In government", "Predicted Blame Counts pr 100 Uttered Sentences"),
+                   title = "Blame Predicted by Government status and ideological bloc",
+                   #ci.lvl = NA,
+                   #axis.lim = c(3,12)
+                   ) +
+  theme_minimal()
+
+
+sjPlot::plot_model(model_bloc_bloc_wing_int, 
+                   type = "pred", 
+                   terms = c("wingness"), 
+                   condition = c(total_nr_sentences = 100),
+                   axis.title = c("Wingness", "Predicted Blame Counts pr 100 Uttered Sentences"),
+                   title = "Blame Predicted by Government status and ideological bloc",
+                   #ci.lvl = NA,
+                   #axis.lim = c(3,12)
+                   ) +
+  theme_minimal()
+
+sjPlot::plot_model(model_bloc_bloc_wing_int, 
+                   type = "pred", 
+                   terms = c("bloc","wingness"), 
+                   condition = c(total_nr_sentences = 100),
+                   axis.title = c("Bloc", "Predicted Blame Counts pr 100 Uttered Sentences"),
+                   title = "Blame Predicted by Government status and ideological bloc",
+                   #ci.lvl = NA,
+                   #axis.lim = c(3,12)
+                   ) +
+  theme_minimal()
+```
+
+
+
+# DO check to see if quadratic control variable for time alters focal predicters
+
+
+```{r}
+# Compare linear vs quadratic time control in Family 2
+model_block_int_linear <- glmmTMB(total_blame ~ in_gov*bloc + bloc * wingness + month_index + (1 | party) +
+                             offset(log(total_nr_sentences)),
+                           family = nbinom1,
+                           data = monthly_blame)
+
+model_block_int_quadratic <- glmmTMB(total_blame ~ in_gov*bloc + bloc * wingness + scale(month_index) + I(scale(month_index)^2) + (1 | party) +
+                             offset(log(total_nr_sentences)),
+                           family = nbinom1,
+                           data = monthly_blame)
+
+AIC(model_block_int_linear, model_block_int_quadratic)
+
+anova(model_block_int_linear, model_block_int_quadratic)
+```
+
+
+```{r}
+# Also check whether political coefficients change materially
+summary(model_block_int_linear)
+
+```
+
+
+```{r}
+summary(model_block_int_quadratic)
+```
+
+
+
+# For newer times
+
+
+#Make data
+
+```{r}
+monthly_blame_18 <- monthly_blame %>% 
+  filter(year >=19) %>% 
+  filter(year <=26) %>% 
+  mutate(month_index = month_index-264)
+```
+
+
+
+
+#Do analysis
+monthly_blame_18
+`
+```{r}
+model_intercept_18 <- glmmTMB(total_blame ~ 1 + month_index + (1|party)+ offset(log(total_nr_sentences)), 
+                           family = nbinom1, 
+                           data = monthly_blame_18)
+
+summary(model_intercept_18)
+```
+
+```{r}
+model_in_gov_18 <- glmmTMB(total_blame ~ in_gov + month_index + (1 | party) +
+                          offset(log(total_nr_sentences)),
+                        family = nbinom1,
+                        data = monthly_blame_18)
+
+summary(model_in_gov_18)
+```
+
+
+
+```{r}
+model_bloc_18 <- glmmTMB(total_blame ~ in_gov + bloc + month_index + (1 | party) +
+                         offset(log(total_nr_sentences)),
+                       family = nbinom1,
+                       data = monthly_blame_18)
+
+summary(model_bloc_18)
+```
+
+```{r}
+model_bloc_wing_18 <- glmmTMB(total_blame ~ in_gov + bloc + wingness + month_index + (1 | party) +
+                         offset(log(total_nr_sentences)),
+                       family = nbinom1,
+                       data = monthly_blame_18)
+
+summary(model_bloc_wing_18)
+```
+
+```{r}
+model_bloc_wing_int_18 <- glmmTMB(total_blame ~ in_gov + bloc * wingness + month_index + (1 | party) +
+                             offset(log(total_nr_sentences)),
+                           family = nbinom1,
+                           data = monthly_blame_18)
+
+summary(model_bloc_wing_int_18)
+```
+
+
+```{r}
+model_in_gov_bloc_wing_int_18 <- glmmTMB(total_blame ~ in_gov *bloc + bloc * wingness + month_index + (1 | party) +
+                             offset(log(total_nr_sentences)),
+                           family = nbinom1,
+                           data = monthly_blame_18)
+
+summary(model_in_gov_bloc_wing_int_18)
+```
+
+
+
+
+```{r}
+anova(model_intercept_18, model_in_gov_18, model_bloc_18, model_bloc_wing_18, model_bloc_wing_int_18, model_in_gov_bloc_wing_int_18)
+```
+
+```{r}
+anova(model_in_gov_18, model_bloc_wing_int_18)
+```
+
+```{r}
+#best model
+summary(model_bloc_wing_int_18)
+```
+
+#check assumption of best model
+
+```{r}
+model_check(model_bloc_wing_int_18)
+```
+#Plot best model
+
+```{r}
+sjPlot::plot_model(model_bloc_wing_int_18, 
+                   type = "pred", 
+                   terms = c("in_gov", "bloc"), 
+                   condition = c(total_nr_sentences = 100),
+                   axis.title = c("In Government", "Predicted Blame Counts pr 100 Uttered Sentences"),
+                   title = "Predicted Blame by In Government and ideological Bloc in period 2019-2022",
+                   #ci.lvl = NA,
+                   #axis.lim = c(3,12)
+                   ) +
+  theme_minimal()
+sjPlot::plot_model(model_bloc_wing_int_18, 
+                   type = "pred", 
+                   terms = c("in_gov"), 
+                   condition = c(total_nr_sentences = 100),
+                   axis.title = c("In Government", "Predicted Blame Counts pr 100 Uttered Sentences"),
+                   title = "Predicted Blame by In Government and ideological Bloc in period 2019-2022",
+                   #ci.lvl = NA,
+                   #axis.lim = c(3,12)
+                   ) +
+  theme_minimal()
+
+sjPlot::plot_model(model_bloc_wing_int_18, 
+                   type = "pred", 
+                   terms = c("bloc"), 
+                   condition = c(total_nr_sentences = 100),
+                   axis.title = c("Bloc", "Predicted Blame Counts pr 100 Uttered Sentences"),
+                   title = "Predicted Blame by In Government and ideological Bloc in period 2019-2022",
+                   #ci.lvl = NA,
+                   #axis.lim = c(3,12)
+                   ) +
+  theme_minimal()
+
+sjPlot::plot_model(model_bloc_wing_int_18, 
+                   type = "pred", 
+                   terms = c("wingness"), 
+                   condition = c(total_nr_sentences = 100),
+                   axis.title = c("Wingness", "Predicted Blame Counts pr 100 Uttered Sentences"),
+                   title = "Predicted Blame by Wing status in period 2019-2022",
+                   #ci.lvl = NA,
+                   #axis.lim = c(3,12)
+                   ) +
+  theme_minimal()
+
+sjPlot::plot_model(model_bloc_wing_int_18, 
+                   type = "pred", 
+                   terms = c("in_gov","wingness"), 
+                   condition = c(total_nr_sentences = 100),
+                   axis.title = c("in_gov", "Predicted Blame Counts pr 100 Uttered Sentences"),
+                   title = "Predicted Blame by Wing status in period 2019-2022",
+                   #ci.lvl = NA,
+                   #axis.lim = c(3,12)
+                   ) +
+  theme_minimal()
+```
+
+
+
+#time as predictor of blame in recent years
+
+```{r}
+model_blame_time_18_intercept <- glmmTMB(total_blame ~ 1 + in_gov  + (1 | party) + offset(log(total_nr_sentences)), 
+                           family = nbinom1, 
+                           data = monthly_blame_18)
+
+summary(model_blame_time_18_intercept)
+```
+
+```{r}
+model_blame_time_18 <- glmmTMB(total_blame ~  in_gov + scale(month_index)  + (1 | party) + offset(log(total_nr_sentences)), 
+                           family = nbinom1, 
+                           data = monthly_blame_18)
+
+summary(model_blame_time_18)
+```
+
+```{r}
+model_blame_time_18_2 <- glmmTMB(total_blame ~ in_gov + scale(month_index) + I(scale(month_index)^2)  + (1 | party) + offset(log(total_nr_sentences)), 
+                           family = nbinom1, 
+                           data = monthly_blame_18)
+
+summary(model_blame_time_18_2)
+```
+```{r}
+anova(model_blame_time_18_intercept,model_blame_time_18, model_blame_time_18_2)
+```
+
+```{r}
+model_check(model_blame_time_18)
+```
+
+# OBS due to convergence issues/singular fit, nbinom 2 was needed here
+
+```{r}
+#best model
+summary(model_blame_time_18)
+```
+
+#Plot this model
+
+```{r}
+sjPlot::plot_model(model_blame_time_18, 
+                   type = "pred", 
+                   terms = c("month_index"), 
+                   condition = c(total_nr_sentences = 100),
+                   axis.title = c("Month since Jan 2019", "Predicted Blame Counts pr 100 Uttered Sentences"),
+                   title = "Evolution of the Use of Blame in period 2019-2022",
+                   #ci.lvl = NA,
+                    axis.lim = c(3,14)
+                   ) +
+  theme_minimal()
+```
+
+```{r}
+sum(monthly_blame$total_blame)/sum(monthly_blame$total_nr_sentences)
+```
+
+
+```{r}
+table(monthly_blame$bloc, monthly_blame$wingness)
+```
+
+
+

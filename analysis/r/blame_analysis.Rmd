@@ -57,7 +57,7 @@ model_check <- function(model_name){
 
 #load data
 ```{r, echo=FALSE}
-inf_data = read_csv("/work/MarkusLundsfrydJensen#1865/inferece_data/inference_data.csv")
+inf_data = read_csv("/work/MarkusLundsfrydJensen#1865/Bachelor_project/data/inference/predicted_inference_data_with_gov.csv")
 
 #Make date column into date object
 inf_data$date = as.Date(inf_data$date)
@@ -85,8 +85,8 @@ inf_data$party[inf_data$party == 'NY'] <- 'LA'
 ```{r, echo=FALSE}
 
 #Omitted parties
-#NA, "UP", "FRI" "CD"  "LH"  "FP"  "IA"  "SIU" "T"   "UFG" "FF" "SP" "NQ"  "JF"   "M", "-"
-parties_to_keep <- c("S", "DF", "EL", "SF", "V", "RV", "KD", "LA", "DD", "FG", "KF", "ALT", "NB" )
+#NA, "UP", "FRI" "CD"  "LH"  "FP"  "IA"  "SIU" "T"   "UFG" "FF" "SP" "NQ"  "JF"   , "-"
+parties_to_keep <- c("S", "DF", "EL", "SF", "V", "RV", "KD", "LA", "DD", "FG", "KF", "ALT", "NB", "M" )
 
 inf_data_filtered <- inf_data %>% 
   filter(party %in% parties_to_keep)
@@ -145,7 +145,7 @@ head(party_leaderboard, 12)
 
 monthly_blame <- inf_data_filtered %>% 
   group_by(month, party) %>% 
-  summarise(in_gov = first(current_speaker_in_government),
+  summarise(in_gov = first(in_gov),
             total_nr_sentences = n(),
             total_blame = sum(prediction),
             year = unique(year)) %>% 
@@ -230,9 +230,9 @@ ggplot(monthly_blame, aes(x = month, y = total_nr_sentences))+
 *In order to make it easier to do statistics and interpretation.Focus will not be on specific parties, but on left/right and center/wing*
 
 ```{r}
-right_wing_parties <- c("V", "KF", "LA", "KD", "DF", "NB", "DD")
+right_wing_parties <- c("V", "KF", "LA", "KD", "DF", "NB", "DD", "M")
 
-center_parties <- c("S", "V", "KF")
+center_parties <- c("S", "V", "KF", "M")
 
 monthly_blame$block <- ifelse(monthly_blame$party %in% right_wing_parties, "Right", "Left")
 
@@ -261,13 +261,14 @@ str(monthly_blame) #all good
 model_blame_time_1 <- glmmTMB(total_blame ~ 1  + (1|party) + (1|in_gov) + offset(log(total_nr_sentences)), 
                            family = nbinom2, 
                            data = monthly_blame)
+summary(model_blame_time_1)
 ```
 
 
 
 ```{r}
 model_blame_time_2 <- glmmTMB(total_blame ~ month_index + (1|party) + (1|in_gov) + offset(log(total_nr_sentences)), 
-                           family = nbinom2, 
+                           family = nbinom1, 
                            data = monthly_blame)
 
 summary(model_blame_time_2)
@@ -289,30 +290,44 @@ anova(model_blame_time_1, model_blame_time_2, model_blame_time_3)
 
 #Plot best model
 
+#OBS plot intercept with confidence intervals. Also change colros of random effects to match red/blue block
+
 ```{r}
 #install.packages("sjPlot")
 
 library(sjPlot)
 
-sjPlot::plot_model(model_blame_time_2, type = "re")
+sjPlot::plot_model(model_blame_time_1, type = "re")
 
 #Due to the offset, in order to do meaningfull interpretation, the total number of sentences must be kept constant. Thus the following plot shows the change in predicted amount of blame pr 1000 sentences uttered as time goes on  
-sjPlot::plot_model(model_blame_time_2, 
+sjPlot::plot_model(model_blame_time_3, 
                    type = "pred", 
                    terms = "month_index", 
                    condition = c(total_nr_sentences = 100),
                    axis.title = c("Months after Jan 2000", "Predicted Blame Counts pr 100 Uttered Sentences"),
                    title = "General Evolution of Blame in the Danish Parliament over time",
-                   ci.lvl = NA,
-                   axis.lim = c(3,7)
+                   #ci.lvl = NA,
+                   #axis.lim = c(3,7)
                    ) +
   theme_minimal()
 ```
+
+```{r}
+sjPlot::plot_model(model_blame_time_1, 
+                   type = "est",
+                   show.values = TRUE,
+                   axis.title = c("", "Estimated Blame Counts per 100 Sentences"),
+                   title = "Overall Level of Blame in Danish Parliament") +
+  theme_minimal()
+```
+
+
+
 #shows downtrend over time
 
 ```{r}
 #check assumptions
-model_check(model_blame_time_2)
+model_check(model_blame_time_1)
 ```
 
 
@@ -398,7 +413,7 @@ sjPlot::plot_model(model_block_int,
                    title = "Blame Predicted by Government and Block",
                    ci.lvl = NA,
                    show.legend = TRUE,
-                   axis.lim = c(3,7)
+                   #axis.lim = c(3,7)
                    ) +
   theme_minimal()
 
@@ -406,10 +421,10 @@ sjPlot::plot_model(model_block_int,
                    type = "pred", 
                    terms = c("block"), 
                    condition = c(total_nr_sentences = 100),
-                   axis.title = c("In government", "Predicted Blame Counts pr 100 Uttered Sentences"),
+                   axis.title = c("Ideological Block", "Predicted Blame Counts pr 100 Uttered Sentences"),
                    title = "Blame Predicted by Block",
                    ci.lvl = NA,
-                   axis.lim = c(3,7)
+                   #axis.lim = c(3,7)
                    ) +
   theme_minimal()
 ```
@@ -425,6 +440,7 @@ sjPlot::plot_model(model_block_int,
 ```{r}
 monthly_blame_18 <- monthly_blame %>% 
   filter(year >=19) %>% 
+  filter(year <=26) %>% 
   mutate(month_index = month_index-227)
 ```
 
@@ -479,7 +495,7 @@ summary(model_block_18)
 
 ```{r}
 model_wing_block_18 <- glmmTMB(total_blame ~ in_gov + wing + block + (1|party) + (1|month_index) + offset(log(total_nr_sentences)), 
-                                family = nbinom1, 
+                                family = nbinom2, 
                                 data = monthly_blame_18)
 
 summary(model_wing_block_18)
@@ -494,14 +510,31 @@ model_block_int_18 <- glmmTMB(total_blame ~ in_gov + block + in_gov * block + (1
 
 summary(model_block_int_18)
 ```
+```{r}
+model_block_wing_int_18 <- glmmTMB(total_blame ~ in_gov + block + wing + in_gov * block + (1|party) + (1|month_index) + offset(log(total_nr_sentences)), 
+                            family = nbinom1, 
+                            data = monthly_blame_18)
+
+summary(model_block_wing_int_18)
+```
 
 
+```{r}
+model_block_wing_int_2_18 <- glmmTMB(total_blame ~ block * wing + in_gov * block + (1|party) + (1|month_index) + offset(log(total_nr_sentences)), 
+                            family = nbinom1, 
+                            data = monthly_blame_18)
 
+summary(model_block_wing_int_2_18)
+```
 
 
 
 ```{r}
-anova(model_intercept_18, model_in_gov_18, model_block_18, model_wing_block_18, model_block_int_18)
+anova(model_intercept_18, model_in_gov_18, model_block_18, model_wing_block_18, model_block_int_18, model_block_wing_int_18, model_block_wing_int_2_18)
+```
+
+```{r}
+anova(model_in_gov_18, model_wing_block_18, model_block_wing_int_18)
 ```
 
 
@@ -533,8 +566,8 @@ sjPlot::plot_model(model_wing_block_18,
                    condition = c(total_nr_sentences = 100),
                    axis.title = c("Block", "Predicted Blame Counts pr 100 Uttered Sentences"),
                    title = "Predicted Blame by Block in period 2019-2022",
-                   ci.lvl = NA,
-                   axis.lim = c(3,6.5)
+                   #ci.lvl = NA,
+                   #axis.lim = c(3,6.5)
                    ) +
   theme_minimal()
 ```
@@ -595,17 +628,13 @@ sjPlot::plot_model(model_blame_time_18_2,
                    condition = c(total_nr_sentences = 100),
                    axis.title = c("Month since Jan 2019", "Predicted Blame Counts pr 100 Uttered Sentences"),
                    title = "Evolution of the Use of Blame in period 2019-2022",
-                   ci.lvl = NA,
-                    axis.lim = c(3,7)
+                   #ci.lvl = NA,
+                    #axis.lim = c(3,7)
                    ) +
   theme_minimal()
 ```
 
 #check assumption
-
-```{r}
-model_check(model_blame_time_18_2)
-```
 
 #Now the trend is turning and in the last few years it has been going up
 
@@ -702,8 +731,8 @@ sjPlot::plot_model(election_model_quad,
                    condition = c(total_nr_sentences = 100),
                    axis.title = c("Months Since Nearest Election", "Predicted Blame Counts pr 100 Uttered Sentences"),
                    title = "Predicted Counts of blame by time since nearest election ",
-                   ci.lvl = NA,
-                   axis.lim = c(3,7)
+                   #ci.lvl = NA,
+                   #axis.lim = c(3,7)
                    ) +
   theme_minimal()
 ```
