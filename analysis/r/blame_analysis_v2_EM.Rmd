@@ -12,7 +12,9 @@ knitr::opts_chunk$set(echo = TRUE)
 #load packages
 
 ```{r, echo=FALSE, include=FALSE}
+options(download.file.method = "wininet")
 install.packages("pacman")
+
 library(pacman)
 
 pacman::p_load("tidyverse", "lubridate", "zoo", "glmmTMB", "DHARMa", "emmeans", "sjPlot")
@@ -59,7 +61,7 @@ model_check <- function(model_name){
 
 #load data
 ```{r}
-inf_data = read_csv("/work/MarkusLundsfrydJensen#1865/Bachelor_project/data/inference/predicted_inference_data_with_gov.csv")
+inf_data = read_csv("C:/Uni/Project/Bachelor_project/data/inference/predicted_inference_data_with_gov.csv")
 
 #Make date column into date object
 inf_data$date = as.Date(inf_data$date)
@@ -89,6 +91,11 @@ inf_data$party[inf_data$party == 'NY'] <- 'LA'
 inf_data_filtered <- inf_data %>% 
   filter(party %in% parties_to_keep) %>% 
   mutate(party = droplevels(party))
+
+inf_data_filtered <- inf_data_filtered %>%
+  mutate(
+    prediction_strict = as.integer(prediction == 1 & confidence > 0.7)  # raise from 0.5
+  )
 
 ```
 
@@ -130,11 +137,13 @@ head(party_leaderboard)
 ```{r, echo=FALSE}
 #make montly blame count pr party along with number of sentences
 
+#NEW APPROACH - HIGHER CONFIDENCE SCORE REQUIRED
+
 monthly_blame <- inf_data_filtered %>% 
   group_by(month, party) %>% 
   summarise(in_gov = first(in_gov),
             total_nr_sentences = n(),
-            total_blame = sum(prediction),
+            total_blame = sum(prediction_strict),
             year = unique(year)) %>% 
   ungroup()
 ```
@@ -142,15 +151,12 @@ monthly_blame <- inf_data_filtered %>%
 ```{r}
 # RECALL = SENS
 # PRECISION = SPEC
-## NEW CHUNK
-# At the top of your analysis, set your classifier's performance
-precision <- 0.80
-recall <- 0.81
+precision <- 0.72 # avg: 0.80
+recall <- 0.79 # avg: 0.81 
 
-# After you create monthly_blame, add corrected blame count
 monthly_blame <- monthly_blame %>%
   mutate(
-    # Observed blame rate (what your classifier said)
+    # Observed blame rate
     obs_blame_rate = total_blame / total_nr_sentences,
     
     # Corrected true blame rate using equation 1 from Magder & Hughes
@@ -158,17 +164,34 @@ monthly_blame <- monthly_blame %>%
     true_blame_rate = (obs_blame_rate - (1 - precision)) / (recall - (1 - precision)),
     
     # Clamp to [0, 1] — if observed rate is below (1-spec), true rate is 0
-    true_blame_rate = pmax(0, pmin(1, true_blame_rate)),
+    true_blame_rate = pmax(0.01, pmin(1, true_blame_rate)),
     
     # Reconstruct corrected count (keep as numeric, models handle this fine)
-    total_blame_corrected = true_blame_rate * total_nr_sentences
+    total_blame_corrected = round(true_blame_rate * total_nr_sentences)
   )
 ```
 
 ```{r}
+print(inf_data_filtered[694, "text"])
+```
+
+
+```{r}
 # NEW CHUNK which shows how different precision / recall scores would present  
-recall_vals <- c(0.75, 0.80, 0.85, 0.90)
-precision_vals <- c(0.75, 0.80, 0.85, 0.90)
+
+
+# how many times more blame does a party produce per sentence when in government compared to when in opposition?
+# So concretely:
+# 
+# IRR = 1.0 means no difference in blame rate between government and opposition
+# IRR = 0.8 means parties in government produce blame at 80% the rate of opposition parties — i.e. 20% less blame per sentence
+# IRR = 1.3 means parties in government produce 30% more blame per sentence than opposition parties
+
+#INTUITION: The IRR (Incidence Rate Ratio) is a measure of how stable the correction math is essentially. It only really gives quantifiable measurements at a higher recall / precision. The highest row shows us that parties in government blame at about 0.5 the rate of opposition parties, which does align with our findings.
+
+
+recall_vals <- c(0.75, 0.80, 0.85, 0.90, 0.95, 0.98)
+precision_vals <- c(0.75, 0.80, 0.85, 0.90, 0.95, 0.98)
 
 sensitivity_grid <- expand.grid(recall = recall_vals, precision = precision_vals) %>%
   rowwise() %>%
@@ -192,12 +215,77 @@ sensitivity_grid <- expand.grid(recall = recall_vals, precision = precision_vals
 # Plot it
 ggplot(sensitivity_grid, aes(x = recall, y = precision, fill = exp(coef_in_gov))) +
   geom_tile() +
-  geom_text(aes(label = round(exp(coef_in_gov), 2)), size = 3) +
-  scale_fill_viridis_c(name = "IRR for in_gov") +
+  geom_text(aes(label = round(exp(coef_in_gov), 3)), size = 3, color="white") +
+  scale_fill_viridis_c(name = "IRR for in_gov", option="h") +
   labs(title = "Sensitivity of in_gov effect to classifier performance assumptions",
        x = "Recall", y = "Precision") +
   theme_minimal()
 ```
+
+```{r}
+# You can see this threshold directly
+tibble(precision = c(0.75, 0.80, 0.85, 0.90, 0.95)) %>%
+  mutate(
+    false_positive_rate = 1 - precision,
+    expected_fp_blame_rate = 0.92 * false_positive_rate,
+    correction_possible = expected_fp_blame_rate < 0.08  # your observed rate
+  )
+
+# Results will show:
+# precision 0.75 -> expected FP rate 0.23 -> correction impossible
+# precision 0.80 -> expected FP rate 0.18 -> correction impossible  
+# precision 0.85 -> expected FP rate 0.14 -> correction impossible
+# precision 0.90 -> expected FP rate 0.09 -> borderline
+# precision 0.95 -> expected FP rate 0.05 -> correction possible
+```
+
+
+```{r}
+# What is your overall observed blame rate?
+mean(monthly_blame$obs_blame_rate)
+
+# How often does correction go negative before clamping?
+monthly_blame %>%
+  mutate(
+    obs_blame_rate = total_blame / total_nr_sentences,
+    unclamped = (obs_blame_rate - (1 - precision)) / (recall - (1 - precision))
+  ) %>%
+  summarise(
+    pct_negative = mean(unclamped < 0),
+    pct_above_1  = mean(unclamped > 1),
+    min_val      = min(unclamped),
+    mean_val     = mean(unclamped)
+  )
+```
+
+```{r}
+# Just show what happens to your key IRRs under different assumptions
+# rather than fully correcting the dependent variable
+
+tibble(
+  sens = c(0.70, 0.79, 0.80, 0.85, 0.90),
+  spec = c(0.70, 0.72, 0.80, 0.85, 0.90)
+) %>%
+  mutate(
+    bias_factor = 1 / (sens + spec - 1),
+    note = "Your true ORs are approximately this multiple of your naive estimates"
+  )
+```
+
+```{r}
+# Quick sanity check with your actual numbers
+sens <- 0.79
+spec <- 0.72
+true_rate <- 0.08
+
+# What observed rate does your classifier actually produce?
+expected_observed <- true_rate * sens + (1 - true_rate) * (1 - spec)
+cat("Expected observed blame rate:", round(expected_observed, 3))
+# = 0.08 * 0.79 + 0.92 * 0.28 = 0.063 + 0.258 = ~0.32
+```
+
+
+
 
 
 ```{r}
@@ -237,6 +325,8 @@ monthly_blame$in_gov <- as.factor(monthly_blame$in_gov)
 
 monthly_blame$total_blame <- as.integer(monthly_blame$total_blame)
 
+monthly_blame$total_blame_corrected <- as.integer(monthly_blame$total_blame_corrected)
+
 monthly_blame$wingness <- as.numeric(monthly_blame$wingness)
 
 monthly_blame$year <- as.integer(monthly_blame$year)
@@ -257,33 +347,61 @@ print(str(monthly_blame))
 ```
 
 
+```{r}
+table(monthly_blame$total_blame_corrected)
+summary(monthly_blame$total_blame_corrected)
 
+length(unique(monthly_blame$party))  # confirm
+table(monthly_blame$party)           # check if some parties have very few rows 
+```
+
+```{r}
+# Are total_nr_sentences very large numbers?
+summary(monthly_blame$total_nr_sentences)
+
+# What is the actual blame rate?
+mean(monthly_blame$total_blame_corrected / monthly_blame$total_nr_sentences)
+```
 
 
 #Blame predicted by time
 
 
 ```{r}
-model_blame_time_1 <- glmmTMB(total_blame ~ 1 + in_gov + (1|party) + offset(log(total_nr_sentences)), 
-                           family = nbinom1, 
+model_blame_time_1 <- glmmTMB(total_blame_corrected ~ 1 + in_gov + (1|party) + offset(log(total_nr_sentences)), 
+                           family = "poisson",
                            data = monthly_blame)
 summary(model_blame_time_1)
 diagnose(model_blame_time_1)
 ```
 
+```{r}
+model_check(model_blame_time_1)
+check_overdispersion(model_blame_time_1)
+
+hist(monthly_blame$total_nr_sentences)
+hist(log(monthly_blame$total_nr_sentences))
+cor(monthly_blame$total_blame_corrected, monthly_blame$total_nr_sentences)
+```
+
+```{r}
+monthly_blame$blame_rate <- monthly_blame$total_blame_corrected / monthly_blame$total_nr_sentences
+hist(monthly_blame$blame_rate)
+summary(monthly_blame$blame_rate)
+```
 
 
 ```{r}
-model_blame_time_2 <- glmmTMB(total_blame ~ scale(month_index) + in_gov + (1|party) + offset(log(total_nr_sentences)), 
-                           family = nbinom1, 
+model_blame_time_2 <- glmmTMB(total_blame_corrected ~ scale(month_index) + in_gov + (1|party) + offset(log(total_nr_sentences)), 
+                           family = "poisson",#nbinom1 
                            data = monthly_blame)
 summary(model_blame_time_2)
 diagnose(model_blame_time_2)
 ```
 
 ```{r}
-model_blame_time_3 <- glmmTMB(total_blame ~ scale(month_index) + I(scale(month_index)^2) + in_gov + (1|party) + offset(log(total_nr_sentences)),
-                           family = nbinom1, 
+model_blame_time_3 <- glmmTMB(total_blame_corrected ~ scale(month_index) + I(scale(month_index)^2) + in_gov + (1|party) + offset(log(total_nr_sentences)),
+                           family = "poisson", #nbinom1
                            data = monthly_blame)
 
 summary(model_blame_time_3)
@@ -295,8 +413,61 @@ diagnose(model_blame_time_3)
 ```{r}
 anova(model_blame_time_1, model_blame_time_2, model_blame_time_3)
 ```
+```{r}
+# Distribution check
+summary(monthly_blame$total_blame_corrected)
+
+hist(monthly_blame$total_blame_corrected, breaks = 50,
+     main = "Distribution of corrected blame counts")
+
+# Compare variance to mean — should be >> 1 for nbinom to help
+var(monthly_blame$total_blame_corrected) / mean(monthly_blame$total_blame_corrected)
+
+# Check for non-integer values which can cause issues
+head(monthly_blame$total_blame_corrected)
+sum(monthly_blame$total_blame_corrected != round(monthly_blame$total_blame_corrected))
+
+monthly_blame <- monthly_blame %>%
+  mutate(total_blame_corrected = round(total_blame_corrected))
+```
+
+```{r}
+# Checking for outliers in the corrected data
+monthly_blame %>%
+  arrange(desc(total_blame_corrected)) %>%
+  select(party, month, total_blame, total_blame_corrected, total_nr_sentences) %>%
+  head(40)
+```
+
+```{r}
+# Compare variance-to-mean ratio before and after correction
+monthly_blame %>%
+  summarise(
+    raw_vmr      = var(total_blame) / mean(total_blame),
+    corrected_vmr = var(total_blame_corrected) / mean(total_blame_corrected)
+  )
+# Corrected VMR will be substantially higher
+```
+
+```{r}
+monthly_blame %>%
+  summarise(
+    raw_vmr       = var(total_blame) / mean(total_blame),
+    corrected_vmr = var(total_blame_corrected) / mean(total_blame_corrected),
+    corrected_mean = mean(total_blame_corrected),
+    corrected_var  = var(total_blame_corrected)
+  )
+
+# Also look at the actual shape
+hist(monthly_blame$total_blame_corrected, breaks = 50)
+hist(monthly_blame$total_blame, breaks = 50)
+```
+
+
+
 
 #check assumptions
+
 ```{r}
 model_check(model_blame_time_3)
 ```
@@ -338,9 +509,13 @@ Given that dispersion is fine and the KS test is the only remaining concern, Opt
 ```{r}
 # Raw count
 table(monthly_blame$total_blame == 0)
+#corrected
+table(monthly_blame$total_blame_corrected==0)
 
 # As proportion
 mean(monthly_blame$total_blame == 0)
+#corrected 
+mean(monthly_blame$total_blame_corrected==0)
 
 # Which parties produce zeros?
 monthly_blame %>% 
@@ -348,6 +523,13 @@ monthly_blame %>%
   summarise(zero_months = sum(total_blame == 0),
             total_months = n(),
             zero_pct = mean(total_blame == 0))
+
+#corrected
+monthly_blame %>% 
+  group_by(party) %>% 
+  summarise(zero_months = sum(total_blame_corrected==0),
+            total_months=n(),
+            zero_pct=mean(total_blame_corrected==0))
 ```
 
 
@@ -388,7 +570,7 @@ Given your research question in Family 2 is about political characteristics, tim
 
 
 ```{r}
-model_intercept <- glmmTMB(total_blame ~ 1 + scale(month_index) + I(scale(month_index)^2) + (1|party) + offset(log(total_nr_sentences)), 
+model_intercept <- glmmTMB(total_blame_corrected ~ 1 + scale(month_index) + I(scale(month_index)^2) + (1|party) + offset(log(total_nr_sentences)), 
                            family = nbinom1, 
                            data = monthly_blame)
 
@@ -397,7 +579,7 @@ diagnose(model_intercept)
 ```
 
 ```{r}
-model_in_gov <- glmmTMB(total_blame ~ in_gov + scale(month_index) + I(scale(month_index)^2) + (1 | party) +
+model_in_gov <- glmmTMB(total_blame_corrected ~ in_gov + scale(month_index) + I(scale(month_index)^2) + (1 | party) +
                           offset(log(total_nr_sentences)),
                         family = nbinom1,
                         data = monthly_blame)
@@ -409,7 +591,7 @@ diagnose(model_in_gov)
 
 
 ```{r}
-model_bloc <- glmmTMB(total_blame ~ in_gov + bloc + scale(month_index) + I(scale(month_index)^2) + (1 | party) +
+model_bloc <- glmmTMB(total_blame_corrected ~ in_gov + bloc + scale(month_index) + I(scale(month_index)^2) + (1 | party) +
                          offset(log(total_nr_sentences)),
                        family = nbinom1,
                        data = monthly_blame)
@@ -419,7 +601,7 @@ diagnose(model_bloc)
 ```
 
 ```{r}
-model_bloc_wing <- glmmTMB(total_blame ~ in_gov + bloc + wingness + scale(month_index) + I(scale(month_index)^2) + (1 | party) +
+model_bloc_wing <- glmmTMB(total_blame_corrected ~ in_gov + bloc + wingness + scale(month_index) + I(scale(month_index)^2) + (1 | party) +
                          offset(log(total_nr_sentences)),
                        family = nbinom1,
                        data = monthly_blame)
@@ -430,7 +612,7 @@ diagnose(model_bloc_wing)
 
 
 ```{r}
-model_bloc_wing_int <- glmmTMB(total_blame ~ in_gov + bloc * wingness + scale(month_index) + I(scale(month_index)^2) + (1 | party) +
+model_bloc_wing_int <- glmmTMB(total_blame_corrected ~ in_gov + bloc * wingness + scale(month_index) + I(scale(month_index)^2) + (1 | party) +
                              offset(log(total_nr_sentences)),
                            family = nbinom1,
                            data = monthly_blame)
@@ -439,7 +621,7 @@ summary(model_bloc_wing_int)
 ```
 
 ```{r}
-model_bloc_bloc_wing_int <- glmmTMB(total_blame ~ in_gov*bloc + bloc * wingness + scale(month_index) + I(scale(month_index)^2) + (1 | party) +
+model_bloc_bloc_wing_int <- glmmTMB(total_blame_corrected ~ in_gov*bloc + bloc * wingness + scale(month_index) + I(scale(month_index)^2) + (1 | party) +
                              offset(log(total_nr_sentences)),
                            family = nbinom1,
                            data = monthly_blame)
@@ -481,7 +663,7 @@ summary(model_bloc_bloc_wing_int)
 #plot it
 
 ```{r}
-model_bloc_bloc_wing_int <- glmmTMB(total_blame ~ in_gov*bloc + bloc * wingness + month_index_scaled + month_index_scaled_sqrt + (1 | party) +
+model_bloc_bloc_wing_int <- glmmTMB(total_blame_corrected ~ in_gov*bloc + bloc * wingness + month_index_scaled + month_index_scaled_sqrt + (1 | party) +
                              offset(log(total_nr_sentences)),
                            family = nbinom1,
                            data = monthly_blame)
@@ -534,12 +716,12 @@ sjPlot::plot_model(model_bloc_bloc_wing_int,
 
 ```{r}
 # Compare linear vs quadratic time control in Family 2
-model_block_int_linear <- glmmTMB(total_blame ~ in_gov*bloc + bloc * wingness + month_index + (1 | party) +
+model_block_int_linear <- glmmTMB(total_blame_corrected ~ in_gov*bloc + bloc * wingness + month_index + (1 | party) +
                              offset(log(total_nr_sentences)),
                            family = nbinom1,
                            data = monthly_blame)
 
-model_block_int_quadratic <- glmmTMB(total_blame ~ in_gov*bloc + bloc * wingness + scale(month_index) + I(scale(month_index)^2) + (1 | party) +
+model_block_int_quadratic <- glmmTMB(total_blame_corrected ~ in_gov*bloc + bloc * wingness + scale(month_index) + I(scale(month_index)^2) + (1 | party) +
                              offset(log(total_nr_sentences)),
                            family = nbinom1,
                            data = monthly_blame)
@@ -582,7 +764,7 @@ monthly_blame_18 <- monthly_blame %>%
 monthly_blame_18
 `
 ```{r}
-model_intercept_18 <- glmmTMB(total_blame ~ 1 + month_index + (1|party)+ offset(log(total_nr_sentences)), 
+model_intercept_18 <- glmmTMB(total_blame_corrected ~ 1 + month_index + (1|party)+ offset(log(total_nr_sentences)), 
                            family = nbinom1, 
                            data = monthly_blame_18)
 
@@ -590,7 +772,7 @@ summary(model_intercept_18)
 ```
 
 ```{r}
-model_in_gov_18 <- glmmTMB(total_blame ~ in_gov + month_index + (1 | party) +
+model_in_gov_18 <- glmmTMB(total_blame_corrected ~ in_gov + month_index + (1 | party) +
                           offset(log(total_nr_sentences)),
                         family = nbinom1,
                         data = monthly_blame_18)
@@ -601,7 +783,7 @@ summary(model_in_gov_18)
 
 
 ```{r}
-model_bloc_18 <- glmmTMB(total_blame ~ in_gov + bloc + month_index + (1 | party) +
+model_bloc_18 <- glmmTMB(total_blame_corrected ~ in_gov + bloc + month_index + (1 | party) +
                          offset(log(total_nr_sentences)),
                        family = nbinom1,
                        data = monthly_blame_18)
@@ -610,7 +792,7 @@ summary(model_bloc_18)
 ```
 
 ```{r}
-model_bloc_wing_18 <- glmmTMB(total_blame ~ in_gov + bloc + wingness + month_index + (1 | party) +
+model_bloc_wing_18 <- glmmTMB(total_blame_corrected ~ in_gov + bloc + wingness + month_index + (1 | party) +
                          offset(log(total_nr_sentences)),
                        family = nbinom1,
                        data = monthly_blame_18)
@@ -619,7 +801,7 @@ summary(model_bloc_wing_18)
 ```
 
 ```{r}
-model_bloc_wing_int_18 <- glmmTMB(total_blame ~ in_gov + bloc * wingness + month_index + (1 | party) +
+model_bloc_wing_int_18 <- glmmTMB(total_blame_corrected ~ in_gov + bloc * wingness + month_index + (1 | party) +
                              offset(log(total_nr_sentences)),
                            family = nbinom1,
                            data = monthly_blame_18)
@@ -629,7 +811,7 @@ summary(model_bloc_wing_int_18)
 
 
 ```{r}
-model_in_gov_bloc_wing_int_18 <- glmmTMB(total_blame ~ in_gov *bloc + bloc * wingness + month_index + (1 | party) +
+model_in_gov_bloc_wing_int_18 <- glmmTMB(total_blame_corrected ~ in_gov *bloc + bloc * wingness + month_index + (1 | party) +
                              offset(log(total_nr_sentences)),
                            family = nbinom1,
                            data = monthly_blame_18)
@@ -730,7 +912,7 @@ sjPlot::plot_model(model_bloc_wing_int_18,
 #time as predictor of blame in recent years
 
 ```{r}
-model_blame_time_18_intercept <- glmmTMB(total_blame ~ 1 + in_gov  + (1 | party) + offset(log(total_nr_sentences)), 
+model_blame_time_18_intercept <- glmmTMB(total_blame_corrected ~ 1 + in_gov  + (1 | party) + offset(log(total_nr_sentences)), 
                            family = nbinom1, 
                            data = monthly_blame_18)
 
@@ -738,7 +920,7 @@ summary(model_blame_time_18_intercept)
 ```
 
 ```{r}
-model_blame_time_18 <- glmmTMB(total_blame ~  in_gov + scale(month_index)  + (1 | party) + offset(log(total_nr_sentences)), 
+model_blame_time_18 <- glmmTMB(total_blame_corrected ~  in_gov + scale(month_index)  + (1 | party) + offset(log(total_nr_sentences)), 
                            family = nbinom1, 
                            data = monthly_blame_18)
 
@@ -746,7 +928,7 @@ summary(model_blame_time_18)
 ```
 
 ```{r}
-model_blame_time_18_2 <- glmmTMB(total_blame ~ in_gov + scale(month_index) + I(scale(month_index)^2)  + (1 | party) + offset(log(total_nr_sentences)), 
+model_blame_time_18_2 <- glmmTMB(total_blame_corrected ~ in_gov + scale(month_index) + I(scale(month_index)^2)  + (1 | party) + offset(log(total_nr_sentences)), 
                            family = nbinom1, 
                            data = monthly_blame_18)
 
@@ -786,7 +968,7 @@ sjPlot::plot_model(model_blame_time_18,
 ```
 
 ```{r}
-sum(monthly_blame$total_blame)/sum(monthly_blame$total_nr_sentences)
+sum(monthly_blame$total_blame_corrected)/sum(monthly_blame$total_nr_sentences)
 ```
 
 
