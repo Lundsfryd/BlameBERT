@@ -5869,3 +5869,25 @@ size 418214
   "arguments": "st\u00f8tter dette lovforslag"
 }
 >>>>>>> 3b8aab0faa159bd11ab9e74f8df5d043ccd4a341
+{
+  "tekst": "Du skal returnere et m\u00e6rkat baseret p\u00e5 din vurdering. Hvis du vurderer at nogle eller noget bliver anklaget for at v\u00e6re skyld i et d\u00e5rligt udfald s\u00e5 skal du returnere [1], hvis du vurderer der ingen anklage er, skal du returnere [0].",
+  "anklage": false
+}{
+  "tekst": "Du skal returnere et m\u00e6rkat baseret p\u00e5 din vurdering. Hvis du vurderer at nogle eller noget bliver anklaget for at v\u00e6re skyld i et d\u00e5rligt udfald s\u00e5 skal du returnere 'True', hvis du vurderer der ingen anklage er, skal du returnere 'False'.",
+  "anklage": false
+}{
+  "tekst": "Du skal returnere et m\u00e6rkat baseret p\u00e5 din vurdering. Hvis du vurderer at nogle eller noget bliver anklaget for at v\u00e6re skyld i et d\u00e5rligt udfald s\u00e5 skal du returnere 'true', hvis du vurderer der ingen anklage er, skal du returnere 'false'.",
+  "anklage": false
+}{
+  "tekst": "<den originale s\u00e6tning>",
+  "anklage": true
+}{
+  "tekst": "<den originale s\u00e6tning>",
+  "anklage": true
+}{
+  "tekst": "Du skal returnere et m\u00e6rkat baseret p\u00e5 din vurdering. Hvis du vurderer at nogle eller noget bliver anklaget for at v\u00e6re skyld i et d\u00e5rligt udfald s\u00e5 skal du returnere 'true', hvis du vurderer der ingen anklage er, skal du returnere 'false'",
+  "anklage": true
+}{
+  "tekst": "Du skal returnere et m\u00e6rkat baseret p\u00e5 din vurdering. Hvis du vurderer at nogle eller noget bliver anklaget for at v\u00e6re skyld i et d\u00e5rligt udfald s\u00e5 skal du returnere 'true', hvis du vurderer der ingen anklage er, skal du returnere 'false'.",
+  "anklage": true
+}
