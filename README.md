@@ -7,7 +7,8 @@ This project develops **BlameBERT**, a fine-tuned multilingual BERT model for de
 The trained model is publicly available on Hugging Face:
 **[Lundsfryd/blameBERT](https://huggingface.co/Lundsfryd/blameBERT)**
 
----
+Reproducability of XML files: Folketingets open data (ODA) FTP server can be accessed by following this guide: https://www.ft.dk/-/media/sites/ft/pdf/dokumenter/aabne-data/oda-browser_brugervejledning.pdf 
+ ---
 
 ## Table of Contents
 
@@ -46,9 +47,9 @@ The goal of the project is to automatically detect sentences in which a Danish p
 ```
 Bachelor_project/
 │
-├── src/                          # All production Python scripts
-│   ├── sentence_segmentation.py          # Sentence segmentation using DaCy/spaCy
-│   ├── machine_trans.py                  # Danish->English translation (MarianMT)
+├── src/
+│   ├── sentence_segmentation.py # Sentence segmentation using DaCy/spaCy
+│   ├── machine_trans.py # Danish->English translation (MarianMT)
 │   ├── PBD.py                            # Preliminary Blame Detection (zero-shot NLI)
 │   ├── template_manipulation.py          # Hypothesis template processing
 │   ├── json_formatting.py                # Label Studio I/O, inter-annotator agreement
