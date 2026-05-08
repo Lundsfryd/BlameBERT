@@ -172,7 +172,7 @@ monthly_blame <- monthly_blame %>%
 ```
 
 ```{r}
-print(inf_data_filtered[694, "text"])
+inf_data_filtered %>% slice(694)
 ```
 
 

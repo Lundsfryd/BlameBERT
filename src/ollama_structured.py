@@ -1,4 +1,3 @@
-# %%
 import json
 import tqdm
 import pandas as pd
@@ -7,16 +6,9 @@ from ollama import chat
 from pydantic import BaseModel, ValidationError
 from typing import List, Optional
 
-class Product(BaseModel):
+class Blame(BaseModel):
     anklage: bool
-
-# %%
-def main():
-    data = load_data(data_dir)
-    runner(data, retries=2)
     
-
-# %%
 def read_jsonl(file_path):
     """Read a jsonl file and return a list of records."""
     print(f'\n\n#### Reading "{file_path}" ####')
@@ -30,17 +22,16 @@ def read_jsonl(file_path):
     return records
 
 def load_data(input_path):
-    # Loading data, renaming columns to what trainer expects, and converting to Dataset
     data_records = read_jsonl(input_path)
     data = pd.DataFrame(data_records)
     data = data[["text"]]
 
     return data
 
-# %%
+
 
 # %%
-def runner(data, retries=2):
+def runner(data, out_dir, retries=2):
     
     results = []
 
@@ -61,7 +52,7 @@ def runner(data, retries=2):
                             'content': f'{sentence}'
                         }
                     ],
-                    format=Product.model_json_schema(),
+                    format=Blame.model_json_schema(),
                     options={'temperature': 0}
                 )
                 
@@ -70,7 +61,7 @@ def runner(data, retries=2):
                 if not raw or not raw.strip():
                     raise ValueError(f"Empty response on attempt {attempt + 1}")
                 
-                parsed = Product.model_validate_json(raw)
+                parsed = Blame.model_validate_json(raw)
                 break
                 
             except (ValidationError, json.JSONDecodeError, ValueError) as e:
@@ -85,12 +76,17 @@ def runner(data, retries=2):
             'anklage': parsed.anklage if parsed else None
         })
 
-    with open('blame_results.json', 'w', encoding='utf-8') as f:
+    with open(f'{out_dir}/blame_results.json', 'w', encoding='utf-8') as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
 
-    print(f"Saved {len(results)} results to blame_results.json")
+    print(f"Saved {len(results)} results to {out_dir}/blame_results.json")
+
+def main():
+    data = load_data(data_dir)
+    runner(data, out_dir, retries=2)
 
 if __name__ == "__main__":
-    root_dir = Path(__file__).parent.parent.parent
+    root_dir = Path(__file__).parent.parent
     data_dir = root_dir / "data" / "training_data" / "validation_set" / "validation_set.jsonl"
+    out_dir = root_dir / "data" / "training_data" / "validation_set"
     main()
