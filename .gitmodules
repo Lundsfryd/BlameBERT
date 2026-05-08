@@ -1,0 +1,3 @@
+[submodule "hf_dataset"]
+	path = hf_dataset
+	url = https://huggingface.co/datasets/runetrust/blame_folketinget_dk
