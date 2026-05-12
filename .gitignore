@@ -1,6 +1,6 @@
 /src/wandb
-!/data/blame_results.json
 /src/__pycache__
 /nbs/4_training/wandb
-/data
+data/*
+!data/blame_results.json
 /training_output
