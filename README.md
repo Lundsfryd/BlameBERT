@@ -73,7 +73,7 @@ For the political analysis, the dataset is further restricted to the 13 parties 
 
 500,500 sentences were randomly sampled for training/validation/testing. These were:
 1. Machine-translated Danish → English using [Opus-MT-da-en](https://huggingface.co/Helsinki-NLP/opus-mt-da-en).
-2. Passed through **DEBATE** (`[Political_DEBATE](https://huggingface.co/mlburnham/Political_DEBATE_large_v1.0)`), a zero-shot NLI classifier, using five hypothesis templates targeting the labels *blame*, *praise*, and *neutral*.
+2. Passed through **DEBATE** ([Political_DEBATE](https://huggingface.co/mlburnham/Political_DEBATE_large_v1.0)), a zero-shot NLI classifier, using five hypothesis templates targeting the labels *blame*, *praise*, and *neutral*.
 3. Labeled as **blame** only if DEBATE's blame probability was ≥ 0.80 and exceeded both other labels.
 
 Because agreement across templates varies, five training datasets of increasing label conservatism — **DIAL-1 through DIAL-5** — were constructed (agreement of at least 1 to all 5 templates). Blame prevalence ranges from 1.71% (DIAL-1) to 0.50% (DIAL-5).
@@ -84,7 +84,7 @@ Because agreement across templates varies, five training datasets of increasing 
 
 ### 4. Model Training (BlameBERT)
 
-- **Base model:** `[mmBERT](https://huggingface.co/jhu-clsp/mmBERT-base)`.
+- **Base model:** [mmBERT](https://huggingface.co/jhu-clsp/mmBERT-base).
 - **Fine-tuning:** full-precision **LoRA** (rank 64, alpha 128) with **focal loss** to address class imbalance.
 - **Hyperparameter search:** grid search over the 5 DIALs × 3 learning rates (`1e-5`, `1e-4`, `5e-4`) × 3 focal-loss alpha scalings (raw, ²⁄₃ power, √), with gamma fixed at 2.0. Each DIAL subset used 20,000 sentences, split 80/20 train/validation, selecting the best checkpoint by Matthews Correlation Coefficient (MCC).
 - **Final model:** trained on **DIAL-5** (learning rate `1e-4`, √ class-weight alpha), chosen for its balance of precision and recall.
