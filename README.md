@@ -136,7 +136,7 @@ BlameBERT's final DIAL-5 checkpoint achieves an average precision of 0.80, recal
 | `data/training_data/` | DIAL-sampled training data and the gold-labeled 424-sentence validation set |
 | `data/inference/` | Sentences prepared for full-corpus inference and resulting predictions |
 
-Full dataset and model card are published on Hugging Face (see project links below); code for all preprocessing and label construction is available under `data_making/scripts/` and `src/`.
+Code for all preprocessing and label construction is available under `data_making/scripts/` and `src/`.
 
 ---
 
