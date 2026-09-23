@@ -165,3 +165,28 @@ Statistical analysis requires:
 ```r
 install.packages(c("tidyverse", "lubridate", "zoo", "glmmTMB", "DHARMa", "emmeans", "sjPlot"))
 ```
+
+
+## Citation
+
+Please cite use of model or dataset as follows:
+```
+@misc{jensenBlamingAislePolitical2026,
+  title = {Blaming {{Across}} the {{Aisle}}: {{Political Contrasting}} and {{Blame Attribution}} in the {{Danish Parliament}}},
+  shorttitle = {Blaming {{Across}} the {{Aisle}}},
+  author = {Jensen, Markus Lundsfryd and Trust, Rune Egeskov and Enevoldsen, Kenneth Christian and Kolding, Sara},
+  year = 2026,
+  month = sep,
+  number = {arXiv:2609.26346},
+  eprint = {2609.26346},
+  primaryclass = {cs.CL},
+  publisher = {arXiv},
+  doi = {10.48550/arXiv.2609.26346},
+  urldate = {2026-09-23},
+  abstract = {Political discourse is widely perceived to be growing more hostile, yet robust evidence remains scarce. This study examines blame attribution in the Danish Parliament from 1997 to 2026, combining a purpose-built classifier, BlameBERT (F1: 0.80), with multilevel statistical modeling. The classifier is constructed using an annotation-efficient pipeline for blame attribution in low-to-mid resource languages. The results reveal a banana-shaped trajectory, with blame declining until around 2016 before entering a significant and sustained increase in recent years (2019-2026). Government status consistently influenced blame attribution - an effect we term political contrasting - with opposition parties blaming substantially more than governing parties. This effect was moderated by ideology: The blame-dampening effect of governing was less pronounced among right-wing parties, and ideological extremity amplified blame more strongly on the right. In recent years, the interaction between political wing and ideological extremity intensified, suggesting an ideological hardening of the blame rhetoric concentrated on the right of the political spectrum. Taken together, these patterns suggest that the perceived rise in harsh political language reflects not merely a general rhetorical drift, but an ideologically asymmetric hardening of political discourse. A sensitivity analysis showed that the conclusions were robust to varying classification thresholds.},
+  archiveprefix = {arXiv},
+  keywords = {Computer Science - Computation and Language},
+  file = {C\:\\Users\\au755063\\Zotero\\storage\\V2UGBG75\\Jensen m.fl. - 2026 - Blaming Across the Aisle Political Contrasting and Blame Attribution in the Danish Parliament.pdf;C\:\\Users\\au755063\\Zotero\\storage\\FPGQUYRS\\2609.html}
+}
+```
+
