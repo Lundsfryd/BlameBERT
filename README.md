@@ -1,8 +1,5 @@
 # BlameBERT — Blame Attribution in the Danish Parliament
 
-
-A project by **Rune Trust** and **Markus Lundsfryd Jensen**.
-
 This repository contains the full pipeline behind *"Blaming Across the Aisle: Political Contrasting and Blame Attribution in the Danish Parliament,"* a study examining how blame rhetoric in the Danish Parliament (Folketinget) has evolved from **1997 to 2026**, and how it relates to party ideology and government status. The project combines:
 
 - **BlameBERT**, a fine-tuned multilingual BERT classifier for detecting blame at the sentence level (Macro F1: **0.80**), built via an annotation-efficient, natural language inference (NLI)-assisted labeling pipeline.
