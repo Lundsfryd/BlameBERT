@@ -108,11 +108,11 @@ def parse_multiple_ft_xml(file_paths: list[str | Path]) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 if __name__ == "__main__":
-    
-    # Works, ideally I want to implement argparse for this instead of hard-coding
-    input_path = os.path.join("..","..","..","..","Data_outside_git","xml_meetings")
-    folders_in_dir = os.listdir(input_path)
-    folder_paths = [os.path.join(input_path, folder) for folder in folders_in_dir]
+
+    root_dir = Path(__file__).parent.parent
+    data_path = root_dir / "data" / "xml"
+    folders_in_dir = os.listdir(data_path)
+    folder_paths = [os.path.join(data_path, folder) for folder in folders_in_dir]
     files = [os.path.join(folder_path, file) for folder_path in folder_paths for file in os.listdir(folder_path)]
     df = parse_multiple_ft_xml(files)
 
@@ -121,7 +121,7 @@ if __name__ == "__main__":
     df = df[df["party"] != "MødeSlut"] # Exclude "MødeSlut" indicators (no data)
     
     # Saving, creating directory if nonexistant
-    outpath = os.path.join("..","..","..","..","Data_outside_git","csv_meetings")
+    outpath = data_path / "out" / "csv_meetings"
     os.makedirs(outpath, exist_ok=True)
     df.to_csv(f'{outpath}/meetings.csv', index=False)
     print(f'Processing finished! Saved to {outpath}/meetings.csv')
