@@ -23,7 +23,7 @@ class SentenceSegmentation(object):
         spacy.prefer_gpu()
 
         print("loading 'da_dacy_large_trf'...") 
-        self.nlp = spacy.load("da_dacy_large_trf", disable=["ner", "trainable_lemmatizer", "morphologizer", "coref", "entity_linker"]) #dacy load does not work, but spacy with the dacy corpus
+        self.nlp = dacy.load("da_dacy_large_trf-1.0.0", disable=["ner", "trainable_lemmatizer", "morphologizer", "coref", "entity_linker"]) #dacy load does not work, but spacy with the dacy corpus
         
         print(f"The loaded model name is: {self.nlp.meta['name']}") # shoudl say the above name
 
